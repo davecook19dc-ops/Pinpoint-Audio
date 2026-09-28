@@ -31,7 +31,7 @@ export interface Folder {
   color: string;
 }
 
-export type ThemeMode = 'light' | 'dark' | 'sepia' | 'midnight';
+export type ThemeMode = 'light' | 'dark' | 'sepia';
 export type FontMode = 'standard' | 'dyslexic';
 
 export interface AppSettings {

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { dbService } from './services/db';
 import { transcriptionService, TranscriptionProgress } from './services/transcriptionService';
-import { AppSettings, CalloutType, Folder, FontMode, Note, Session } from './types';
+import { AppSettings, CalloutType, Folder, FontMode, Note, Session, ThemeMode } from './types';
 import { formatTime, seedInitialDataIfNeeded } from './utils/audio';
 import { generateStandaloneHtml } from './utils/exportHtml';
 import { Sidebar } from './components/Sidebar';
@@ -23,6 +23,7 @@ import {
   Folder as FolderIcon,
   Sun,
   Moon,
+  Palette,
   Type,
 } from 'lucide-react';
 
@@ -934,17 +935,12 @@ export default function App() {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b') {
         e.preventDefault();
         setSettings((prev) => {
-          const themes: Array<'light' | 'dark' | 'sepia' | 'midnight'> = [
-            'light',
-            'dark',
-            'sepia',
-            'midnight',
-          ];
+          const themes: ThemeMode[] = ['light', 'dark', 'sepia'];
           const currentIndex = themes.indexOf(prev.theme);
-          const nextTheme = themes[(currentIndex + 1) % themes.length];
+          const nextTheme = themes[(currentIndex !== -1 ? currentIndex + 1 : 0) % themes.length];
           const updated = { ...prev, theme: nextTheme };
           dbService.saveSettings(updated);
-          showToast(`Theme: ${nextTheme}`);
+          showToast(`Theme: ${nextTheme.toUpperCase()}`);
           return updated;
         });
         return;
@@ -1043,11 +1039,10 @@ export default function App() {
   ]);
 
   // Theme styling classes
-  const themeClasses: Record<string, string> = {
+  const themeClasses: Record<ThemeMode, string> = {
     light: 'bg-neutral-50 text-neutral-900',
     dark: 'dark bg-neutral-950 text-neutral-100',
-    sepia: 'bg-[#FBF8EF] text-[#2C2416]',
-    midnight: 'dark bg-[#0B0F19] text-[#E2E8F0]',
+    sepia: 'bg-[#F4ECD8] text-[#272016]',
   };
 
   const fontClass = settings.fontMode === 'dyslexic' ? 'font-dyslexic' : 'font-standard';
@@ -1197,20 +1192,18 @@ export default function App() {
           {/* Theme Toggle */}
           <button
             onClick={() => {
-              const themes: Array<'light' | 'dark' | 'sepia' | 'midnight'> = [
-                'light',
-                'dark',
-                'sepia',
-                'midnight',
-              ];
-              const nextTheme = themes[(themes.indexOf(settings.theme) + 1) % themes.length];
+              const themes: ThemeMode[] = ['light', 'dark', 'sepia'];
+              const currentIndex = themes.indexOf(settings.theme);
+              const nextTheme = themes[(currentIndex !== -1 ? currentIndex + 1 : 0) % themes.length];
               handleUpdateSettings({ theme: nextTheme });
             }}
-            title="Cycle Theme"
+            title="Cycle Theme (Light → Dark → Sepia)"
             className="p-1.5 sm:px-2.5 sm:py-1.5 rounded-xl border border-[#e8e4dc] dark:border-stone-700 bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200 hover:bg-[#f0ece4] dark:hover:bg-stone-700 text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer shadow-2xs"
           >
-            {settings.theme === 'dark' || settings.theme === 'midnight' ? (
+            {settings.theme === 'dark' ? (
               <Moon className="w-3.5 h-3.5 text-indigo-400" />
+            ) : settings.theme === 'sepia' ? (
+              <Palette className="w-3.5 h-3.5 text-amber-700 dark:text-amber-400" />
             ) : (
               <Sun className="w-3.5 h-3.5 text-amber-500" />
             )}

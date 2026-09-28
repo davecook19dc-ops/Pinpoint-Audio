@@ -102,7 +102,7 @@ const SHORTCUTS: ShortcutItem[] = [
   },
   {
     keys: ['Ctrl / ⌘', 'B'],
-    description: 'Cycle display themes (Light → Dark → Sepia → Midnight)',
+    description: 'Cycle display themes (Light → Dark → Sepia)',
     category: 'accessibility',
   },
 ];

@@ -43,6 +43,20 @@ export async function generateStandaloneHtml(
     body { font-family: 'Plus Jakarta Sans', system-ui, sans-serif; }
     .font-dyslexic { font-family: 'OpenDyslexic', 'Plus Jakarta Sans', sans-serif !important; }
     .font-mono { font-family: 'JetBrains Mono', monospace; font-variant-numeric: tabular-nums; }
+    body.theme-sepia {
+      background-color: #F4ECD8 !important;
+      color: #272016 !important;
+    }
+    body.theme-sepia header,
+    body.theme-sepia section,
+    body.theme-sepia .bg-white {
+      background-color: #FAF4E8 !important;
+      border-color: #E2D7C0 !important;
+    }
+    body.theme-sepia .bg-neutral-50 {
+      background-color: #EFE7D2 !important;
+      border-color: #E2D7C0 !important;
+    }
   </style>
 </head>
 <body class="bg-neutral-50 text-neutral-900 min-h-screen antialiased flex flex-col" id="appBody">
@@ -57,16 +71,16 @@ export async function generateStandaloneHtml(
         <p class="text-[11px] text-neutral-500">${escapeHtml(folderName)} · Offline Standalone Export</p>
       </div>
     </div>
-    <div class="flex items-center gap-3">
-      <button onclick="toggleShortcutsModal()" class="px-2.5 py-1 text-xs border border-neutral-200 rounded-md hover:bg-neutral-100 transition-colors flex items-center gap-1 font-medium">
+    <div class="flex items-center gap-2 sm:gap-3">
+      <button onclick="toggleShortcutsModal()" class="px-2.5 py-1 text-xs border border-neutral-200 rounded-md hover:bg-neutral-100 transition-colors flex items-center gap-1 font-medium cursor-pointer">
         <span>⌨️ Shortcuts</span>
         <kbd class="text-[10px] bg-neutral-100 border border-neutral-300 px-1 rounded font-mono">?</kbd>
       </button>
-      <button onclick="toggleDyslexicFont()" class="px-2.5 py-1 text-xs border border-neutral-200 rounded-md hover:bg-neutral-100 transition-colors font-medium">
+      <button onclick="toggleDyslexicFont()" class="px-2.5 py-1 text-xs border border-neutral-200 rounded-md hover:bg-neutral-100 transition-colors font-medium cursor-pointer">
         Toggle OpenDyslexic
       </button>
-      <button onclick="toggleDarkMode()" class="px-2.5 py-1 text-xs border border-neutral-200 rounded-md hover:bg-neutral-100 transition-colors font-medium">
-        Toggle Theme
+      <button id="themeToggleBtn" onclick="cycleTheme()" class="px-2.5 py-1 text-xs border border-neutral-200 rounded-md hover:bg-neutral-100 transition-colors font-medium cursor-pointer">
+        Theme: Light
       </button>
     </div>
   </header>
@@ -282,7 +296,7 @@ export async function generateStandaloneHtml(
     const quickTimeTag = document.getElementById('quickTimeTag');
     const newNoteTimeTag = document.getElementById('newNoteTimeTag');
     let isDyslexic = false;
-    let isDark = false;
+    let currentTheme = 'light';
     let isAudioEnhanced = false;
 
     // Web Audio API DSP Nodes for Voice Boost & Auto-Leveling
@@ -433,16 +447,32 @@ export async function generateStandaloneHtml(
       document.body.classList.toggle('font-dyslexic', isDyslexic);
     }
 
-    function toggleDarkMode() {
-      isDark = !isDark;
-      if (isDark) {
+    function cycleTheme() {
+      const themes = ['light', 'dark', 'sepia'];
+      const currentIndex = themes.indexOf(currentTheme);
+      const nextTheme = themes[(currentIndex !== -1 ? currentIndex + 1 : 0) % themes.length];
+      setTheme(nextTheme);
+    }
+
+    function setTheme(theme) {
+      currentTheme = theme;
+      const body = document.getElementById('appBody');
+      const btn = document.getElementById('themeToggleBtn');
+
+      document.documentElement.classList.remove('dark');
+      body.classList.remove('theme-sepia');
+      body.classList.remove('bg-neutral-50', 'bg-neutral-900', 'bg-[#F4ECD8]', 'text-neutral-900', 'text-neutral-100', 'text-[#272016]');
+
+      if (theme === 'dark') {
         document.documentElement.classList.add('dark');
-        document.getElementById('appBody').classList.replace('bg-neutral-50', 'bg-neutral-900');
-        document.getElementById('appBody').classList.replace('text-neutral-900', 'text-neutral-100');
+        body.classList.add('bg-neutral-900', 'text-neutral-100');
+        if (btn) btn.innerText = 'Theme: Dark';
+      } else if (theme === 'sepia') {
+        body.classList.add('theme-sepia', 'bg-[#F4ECD8]', 'text-[#272016]');
+        if (btn) btn.innerText = 'Theme: Sepia';
       } else {
-        document.documentElement.classList.remove('dark');
-        document.getElementById('appBody').classList.replace('bg-neutral-900', 'bg-neutral-50');
-        document.getElementById('appBody').classList.replace('text-neutral-100', 'text-neutral-900');
+        body.classList.add('bg-neutral-50', 'text-neutral-900');
+        if (btn) btn.innerText = 'Theme: Light';
       }
     }
 

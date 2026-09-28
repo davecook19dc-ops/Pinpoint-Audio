@@ -295,7 +295,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <span>Theme:</span>
             </span>
             <div className="flex items-center gap-1">
-              {(['light', 'dark', 'sepia', 'midnight'] as ThemeMode[]).map((theme) => (
+              {(['light', 'dark', 'sepia'] as ThemeMode[]).map((theme) => (
                 <button
                   key={theme}
                   onClick={() => onUpdateSettings({ theme })}
