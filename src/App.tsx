@@ -438,6 +438,29 @@ export default function App() {
     showToast('Voice recording saved to IndexedDB!');
   };
 
+  const handleDiscardAudio = async () => {
+    if (!currentSession) return;
+    const updatedSession: Session = {
+      ...currentSession,
+      audioBlob: undefined,
+      audioMimeType: undefined,
+      audioFileName: undefined,
+      duration: 0,
+      transcript: undefined,
+      updatedAt: Date.now(),
+    };
+    await dbService.saveSession(updatedSession);
+    if (audioUrl) {
+      URL.revokeObjectURL(audioUrl);
+      setAudioUrl(null);
+    }
+    setCurrentTime(0);
+    setDuration(0);
+    const updatedSessions = await dbService.getAllSessions();
+    setSessions(updatedSessions);
+    showToast('Recording discarded. Ready for new recording.');
+  };
+
   const handleAudioUploaded = async (file: File) => {
     // Read audio duration using temporary audio element or Web Audio decodeAudioData
     const tempUrl = URL.createObjectURL(file);
@@ -1457,6 +1480,7 @@ export default function App() {
               onCancelTranscription={handleCancelTranscription}
               onSaveTranscript={handleSaveTranscript}
               onUploadSlide={handleUploadSlide}
+              onDiscardAudio={handleDiscardAudio}
               onUpdateTitle={(newTitle) => {
                 if (currentSessionId) {
                   handleUpdateSessionTitle(currentSessionId, newTitle);

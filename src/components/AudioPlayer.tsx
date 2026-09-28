@@ -25,6 +25,9 @@ import {
   X,
   Edit2,
   Check,
+  CheckCircle2,
+  Trash2,
+  RefreshCw,
 } from 'lucide-react';
 import { Note, Session } from '../types';
 import { formatTime, downloadAudioAsMp3 } from '../utils/audio';
@@ -63,6 +66,7 @@ interface AudioPlayerProps {
   onUploadSlide?: (file: File) => void;
   onOpenSlides?: () => void;
   onUpdateTitle?: (newTitle: string) => void;
+  onDiscardAudio?: () => void;
 }
 
 export const AudioPlayer: React.FC<AudioPlayerProps> = ({
@@ -97,6 +101,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
   onUploadSlide,
   onOpenSlides,
   onUpdateTitle,
+  onDiscardAudio,
 }) => {
   // Session Title inline editing state
   const [isEditingTitle, setIsEditingTitle] = useState(false);
@@ -133,8 +138,10 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
 
   // Recording state
   const [isRecording, setIsRecording] = useState(false);
+  const [isRecordingPaused, setIsRecordingPaused] = useState(false);
   const [recordingMode, setRecordingMode] = useState<'mic' | 'meeting'>('mic');
   const [recordingSeconds, setRecordingSeconds] = useState(0);
+  const recordingSecondsRef = useRef<number>(0);
   const [micError, setMicError] = useState<string | null>(null);
   const [recordingNotice, setRecordingNotice] = useState<string | null>(null);
   const [showMobileMeetingNotice, setShowMobileMeetingNotice] = useState(false);
@@ -384,8 +391,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
           type: selectedMime || 'audio/webm',
         });
 
-        const elapsedMs = Date.now() - recordingStartTimeRef.current;
-        const recordedDuration = Math.max(1, Math.round(elapsedMs / 1000));
+        const recordedDuration = Math.max(1, recordingSecondsRef.current || 1);
         const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
         const prefix = mode === 'meeting' ? 'Meeting' : 'Recording';
         const fileName = `${prefix}_${timestamp}.${selectedMime.includes('ogg') ? 'ogg' : 'webm'}`;
@@ -394,7 +400,9 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
         onAudioRecorded(finalBlob, recordedDuration, fileName, sessionToUpdate);
         activeRecordingSessionIdRef.current = null;
         setRecordingSeconds(0);
+        recordingSecondsRef.current = 0;
         setIsRecording(false);
+        setIsRecordingPaused(false);
         setRecordingNotice(null);
         onTimeUpdate(0);
       };
@@ -410,16 +418,19 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
 
       mediaRecorderRef.current = mediaRecorder;
       recordingStartTimeRef.current = Date.now();
+      recordingSecondsRef.current = 0;
       mediaRecorder.start(250); // Collect data chunks every 250ms
       setIsRecording(true);
+      setIsRecordingPaused(false);
       setRecordingSeconds(0);
 
       // Start elapsed timer and keep current playback time in sync for live note timestamps
+      if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
       recordingTimerRef.current = window.setInterval(() => {
-        const elapsed = Math.floor((Date.now() - recordingStartTimeRef.current) / 1000);
-        setRecordingSeconds(elapsed);
-        onTimeUpdate(elapsed);
-      }, 500);
+        recordingSecondsRef.current += 1;
+        setRecordingSeconds(recordingSecondsRef.current);
+        onTimeUpdate(recordingSecondsRef.current);
+      }, 1000);
 
       // Start visualizer animation
       drawVisualizer();
@@ -428,7 +439,50 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
         err instanceof Error ? err.message : 'Could not access audio recording devices.';
       setMicError(message);
       setIsRecording(false);
+      setIsRecordingPaused(false);
     }
+  };
+
+  // Pause active recording session
+  const pauseRecording = () => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+      try {
+        mediaRecorderRef.current.pause();
+      } catch (err) {
+        console.warn('Error pausing media recorder:', err);
+      }
+    }
+    if (recordingTimerRef.current) {
+      clearInterval(recordingTimerRef.current);
+      recordingTimerRef.current = null;
+    }
+    if (animFrameRef.current) {
+      cancelAnimationFrame(animFrameRef.current);
+      animFrameRef.current = null;
+    }
+    setIsRecordingPaused(true);
+  };
+
+  // Resume paused recording session
+  const resumeRecording = () => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'paused') {
+      try {
+        mediaRecorderRef.current.resume();
+      } catch (err) {
+        console.warn('Error resuming media recorder:', err);
+      }
+    }
+    if (recordingTimerRef.current) {
+      clearInterval(recordingTimerRef.current);
+    }
+    recordingTimerRef.current = window.setInterval(() => {
+      recordingSecondsRef.current += 1;
+      setRecordingSeconds(recordingSecondsRef.current);
+      onTimeUpdate(recordingSecondsRef.current);
+    }, 1000);
+
+    setIsRecordingPaused(false);
+    drawVisualizer();
   };
 
   // Stop recording
@@ -436,6 +490,10 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
     if (recordingTimerRef.current) {
       clearInterval(recordingTimerRef.current);
       recordingTimerRef.current = null;
+    }
+    if (animFrameRef.current) {
+      cancelAnimationFrame(animFrameRef.current);
+      animFrameRef.current = null;
     }
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
       mediaRecorderRef.current.stop();
@@ -590,16 +648,39 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
       {/* Recording & Input Action Zone */}
       <div className="mb-6 space-y-3">
         {isRecording ? (
-          <div className="p-4 rounded-xl border border-red-500/30 bg-red-50 dark:bg-red-950/20">
+          <div
+            className={`p-4 rounded-xl border transition-all ${
+              isRecordingPaused
+                ? 'border-amber-500/40 bg-amber-50/70 dark:bg-amber-950/20 shadow-2xs'
+                : 'border-red-500/30 bg-red-50 dark:bg-red-950/20 shadow-xs'
+            }`}
+          >
             <div className="flex items-center justify-between mb-3">
               <div className="flex items-center gap-2 min-w-0">
-                <span className="w-3 h-3 rounded-full bg-red-500 animate-pulse shrink-0" />
+                {isRecordingPaused ? (
+                  <span className="w-3 h-3 rounded-full bg-amber-500 shrink-0" />
+                ) : (
+                  <span className="w-3 h-3 rounded-full bg-red-500 animate-pulse shrink-0" />
+                )}
                 <div className="min-w-0">
-                  <span className="text-xs font-semibold text-red-700 dark:text-red-400 block truncate">
-                    {recordingMode === 'meeting'
-                      ? 'Recording Meeting Audio...'
-                      : 'Recording Microphone...'}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={`text-xs font-bold block truncate ${
+                        isRecordingPaused
+                          ? 'text-amber-800 dark:text-amber-300'
+                          : 'text-red-700 dark:text-red-400'
+                      }`}
+                    >
+                      {recordingMode === 'meeting'
+                        ? 'Recording Meeting Audio'
+                        : 'Recording Microphone'}
+                    </span>
+                    {isRecordingPaused && (
+                      <span className="px-1.5 py-0.2 rounded bg-amber-200 dark:bg-amber-900/80 text-amber-900 dark:text-amber-200 text-[10px] font-bold font-mono">
+                        PAUSED
+                      </span>
+                    )}
+                  </div>
                   {recordingMode === 'meeting' && (
                     <span className="text-[10px] text-red-600/80 dark:text-red-400/80 block truncate">
                       Teams / Zoom / System audio + Mic mixed
@@ -607,26 +688,137 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
                   )}
                 </div>
               </div>
-              <span className="font-mono text-sm font-bold text-red-700 dark:text-red-400 tabular-nums shrink-0">
+              <span
+                className={`font-mono text-sm font-bold tabular-nums shrink-0 ${
+                  isRecordingPaused
+                    ? 'text-amber-800 dark:text-amber-300'
+                    : 'text-red-700 dark:text-red-400'
+                }`}
+              >
                 {formatTime(recordingSeconds)}
               </span>
             </div>
 
             {/* Live Visualizer Canvas */}
-            <canvas
-              ref={canvasRef}
-              width={280}
-              height={48}
-              className="w-full h-12 rounded bg-neutral-900/10 dark:bg-neutral-900/50 mb-3"
-            />
+            <div className="relative mb-3">
+              <canvas
+                ref={canvasRef}
+                width={280}
+                height={48}
+                className={`w-full h-12 rounded transition-opacity ${
+                  isRecordingPaused
+                    ? 'opacity-40 bg-amber-900/10 dark:bg-amber-900/30'
+                    : 'bg-neutral-900/10 dark:bg-neutral-900/50'
+                }`}
+              />
+              {isRecordingPaused && (
+                <div className="absolute inset-0 flex items-center justify-center text-[11px] font-bold text-amber-900 dark:text-amber-300 bg-amber-50/40 dark:bg-amber-950/40 backdrop-blur-[1px] rounded">
+                  Waveform Frozen (Paused)
+                </div>
+              )}
+            </div>
 
-            <button
-              onClick={stopRecording}
-              className="w-full py-2.5 px-4 bg-red-600 hover:bg-red-700 text-white font-medium rounded-lg text-xs flex items-center justify-center gap-2 transition-colors shadow-sm cursor-pointer"
-            >
-              <Square className="w-3.5 h-3.5 fill-current" />
-              <span>Stop & Save to IndexedDB</span>
-            </button>
+            {/* Action Buttons: Pause/Resume + Stop */}
+            <div className="flex items-center gap-2">
+              {isRecordingPaused ? (
+                <button
+                  type="button"
+                  onClick={resumeRecording}
+                  title="Resume Recording"
+                  className="flex-1 py-2.5 px-3 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-lg text-xs flex items-center justify-center gap-1.5 transition-colors shadow-2xs cursor-pointer"
+                >
+                  <Play className="w-4 h-4 fill-current" />
+                  <span>Resume</span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={pauseRecording}
+                  title="Pause Recording"
+                  className="flex-1 py-2.5 px-3 bg-amber-500 hover:bg-amber-600 text-white font-semibold rounded-lg text-xs flex items-center justify-center gap-1.5 transition-colors shadow-2xs cursor-pointer"
+                >
+                  <Pause className="w-4 h-4 fill-current" />
+                  <span>Pause</span>
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={stopRecording}
+                title="Finish and save recording"
+                className="flex-1 py-2.5 px-3 bg-red-600 hover:bg-red-700 text-white font-semibold rounded-lg text-xs flex items-center justify-center gap-1.5 transition-colors shadow-2xs cursor-pointer"
+              >
+                <Square className="w-3.5 h-3.5 fill-current" />
+                <span>Stop & Save</span>
+              </button>
+            </div>
+          </div>
+        ) : currentSession?.audioBlob ? (
+          /* Post-Recording Completed State: Record controls are HIDDEN to prevent accidental overwrites */
+          <div className="p-3.5 rounded-xl border border-emerald-500/20 bg-emerald-50/50 dark:bg-emerald-950/20 space-y-2.5 shadow-2xs">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 min-w-0">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                <div className="min-w-0">
+                  <span className="text-xs font-bold text-emerald-900 dark:text-emerald-200 block truncate">
+                    Recording Ready
+                  </span>
+                  <p className="text-[11px] text-stone-500 dark:text-stone-400 truncate font-mono">
+                    {currentSession.audioFileName || 'Voice Recording'} • {formatTime(duration)}
+                  </p>
+                </div>
+              </div>
+
+              {/* Safe Discard & Start New Recording Flow */}
+              <button
+                type="button"
+                onClick={() => {
+                  const confirmed = window.confirm(
+                    'Are you sure you want to discard this recording and record again? The current audio will be cleared.'
+                  );
+                  if (confirmed && onDiscardAudio) {
+                    onDiscardAudio();
+                  }
+                }}
+                className="py-1 px-2.5 rounded-lg bg-white/90 dark:bg-stone-800/90 hover:bg-rose-50 dark:hover:bg-rose-950/50 text-stone-600 hover:text-rose-600 dark:text-stone-300 dark:hover:text-rose-400 border border-stone-200 dark:border-stone-700 text-[11px] font-semibold flex items-center gap-1 transition-colors cursor-pointer shrink-0 shadow-2xs"
+                title="Discard current audio to allow recording a new track"
+              >
+                <Trash2 className="w-3 h-3" />
+                <span>Discard & Record Again</span>
+              </button>
+            </div>
+
+            {/* Post-recording Toolset Quick Bar */}
+            <div className="flex flex-wrap items-center gap-2 pt-1.5 border-t border-emerald-500/10">
+              <button
+                onClick={() => slideFileInputRef.current?.click()}
+                className="py-1.5 px-2.5 rounded-lg bg-white dark:bg-stone-800 hover:bg-[#f0ece4] dark:hover:bg-stone-700 text-stone-800 dark:text-stone-200 border border-[#e8e4dc] dark:border-stone-700 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs relative"
+                title="Attach slide or image to this recording"
+              >
+                <ImageIcon className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                <span>Attach Slide</span>
+                {currentSession?.images && currentSession.images.length > 0 && (
+                  <span className="ml-0.5 px-1.5 py-0.2 rounded-full bg-amber-500 text-white font-mono text-[9px] font-bold">
+                    {currentSession.images.length}
+                  </span>
+                )}
+              </button>
+              <input
+                ref={slideFileInputRef}
+                type="file"
+                accept="image/*,application/pdf"
+                multiple
+                className="hidden"
+                onChange={(e) => {
+                  if (e.target.files && e.target.files.length > 0) {
+                    Array.from(e.target.files).forEach((file) => {
+                      if (onUploadSlide) onUploadSlide(file);
+                    });
+                    e.target.value = '';
+                  }
+                }}
+              />
+            </div>
           </div>
         ) : (
           <div className="grid grid-cols-3 md:grid-cols-4 gap-2">
