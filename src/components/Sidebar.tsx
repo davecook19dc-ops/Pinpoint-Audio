@@ -8,6 +8,7 @@ import {
   Palette,
   Layers,
   Keyboard,
+  ArrowRightLeft,
 } from 'lucide-react';
 import { AppSettings, Folder, Session, ThemeMode } from '../types';
 import { PWAInstallButton } from './PWAInstallButton';
@@ -28,6 +29,7 @@ interface SidebarProps {
   onUpdateSettings: (newSettings: Partial<AppSettings>) => void;
   onExportStandaloneHtml: () => void;
   onOpenShortcuts: () => void;
+  onOpenSync?: () => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -45,6 +47,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onUpdateSettings,
   onExportStandaloneHtml,
   onOpenShortcuts,
+  onOpenSync,
 }) => {
   const [isAddingFolder, setIsAddingFolder] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
@@ -327,6 +330,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <span>Keyboard Shortcuts</span>
             </div>
             <kbd className="px-1.5 py-0.2 rounded bg-[#f0ece4] dark:bg-stone-800 border border-stone-300 dark:border-stone-700 text-[10px] font-mono">?</kbd>
+          </button>
+
+          <button
+            onClick={onOpenSync}
+            title="Open WebRTC Direct P2P Device Sync"
+            className="w-full py-1.5 px-2 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/40 dark:hover:bg-emerald-900/60 border border-emerald-200/80 dark:border-emerald-800/80 text-emerald-800 dark:text-emerald-300 rounded-lg text-[11px] font-semibold flex items-center justify-between transition-colors cursor-pointer shadow-2xs"
+          >
+            <div className="flex items-center gap-1.5">
+              <ArrowRightLeft className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+              <span>P2P Device Sync</span>
+            </div>
+            <span className="text-[9px] font-mono font-bold px-1.5 py-0.2 rounded bg-emerald-200/80 dark:bg-emerald-900 text-emerald-900 dark:text-emerald-200">
+              WebRTC
+            </span>
           </button>
 
           <button

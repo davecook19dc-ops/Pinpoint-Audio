@@ -10,6 +10,7 @@ import {
   Search,
   Download,
   Loader2,
+  ArrowRightLeft,
 } from 'lucide-react';
 import { Folder, Session } from '../types';
 import { formatTime, downloadAudioAsMp3 } from '../utils/audio';
@@ -28,6 +29,7 @@ interface DashboardViewProps {
   onAudioUploadedInFolder: (folderId: string, file: File) => void;
   onExportStandaloneHtml: () => void;
   onOpenShortcuts: () => void;
+  onOpenSync?: () => void;
 }
 
 function formatDateTime(timestamp: number): string {
@@ -59,6 +61,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   onDeleteSession,
   onAudioUploadedInFolder,
   onOpenShortcuts,
+  onOpenSync,
 }) => {
   const [isCreatingFolder, setIsCreatingFolder] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
@@ -142,6 +145,17 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
           {/* Folder Action Buttons */}
           <div className="flex items-center gap-2">
+            {onOpenSync && (
+              <button
+                onClick={onOpenSync}
+                title="Open WebRTC P2P Device Sync"
+                className="py-2 px-3 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/60 dark:hover:bg-emerald-900/60 border border-emerald-300 dark:border-emerald-800/80 text-emerald-800 dark:text-emerald-300 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs"
+              >
+                <ArrowRightLeft className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                <span className="hidden sm:inline">P2P Sync</span>
+              </button>
+            )}
+
             <button
               onClick={() => fileUploadInputRef.current?.click()}
               className="py-2 px-3.5 bg-white dark:bg-stone-900 border border-[#e8e4dc] dark:border-stone-700 hover:bg-[#f7f5f0] dark:hover:bg-stone-800 text-stone-800 dark:text-stone-200 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs"

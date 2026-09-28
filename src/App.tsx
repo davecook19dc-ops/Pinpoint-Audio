@@ -13,6 +13,7 @@ import { DashboardView } from './components/DashboardView';
 import { KeyboardShortcutsModal } from './components/KeyboardShortcutsModal';
 import { ConfirmDeleteModal } from './components/ConfirmDeleteModal';
 import { PWAInstallButton } from './components/PWAInstallButton';
+import { SyncPanel } from './components/SyncPanel';
 import {
   Menu,
   Plus,
@@ -28,6 +29,7 @@ import {
   Palette,
   Type,
   Edit2,
+  ArrowRightLeft,
 } from 'lucide-react';
 
 export default function App() {
@@ -72,6 +74,7 @@ export default function App() {
   const [quickAddTriggered, setQuickAddTriggered] = useState<boolean>(false);
   const [showMobileNotes, setShowMobileNotes] = useState<boolean>(false);
   const [isShortcutsOpen, setIsShortcutsOpen] = useState<boolean>(false);
+  const [isSyncOpen, setIsSyncOpen] = useState<boolean>(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState<boolean>(false);
 
@@ -459,6 +462,16 @@ export default function App() {
     const updatedSessions = await dbService.getAllSessions();
     setSessions(updatedSessions);
     showToast('Recording discarded. Ready for new recording.');
+  };
+
+  const handleReloadLibrary = async () => {
+    const updatedSessions = await dbService.getAllSessions();
+    const updatedFolders = await dbService.getAllFolders();
+    setSessions(updatedSessions);
+    setFolders(updatedFolders);
+    const usage = await dbService.estimateStorageUsage();
+    setStorageUsage(usage);
+    showToast('P2P Library Sync complete! Records merged.');
   };
 
   const handleAudioUploaded = async (file: File) => {
@@ -1391,6 +1404,16 @@ export default function App() {
             <span className="hidden sm:inline capitalize">{settings.theme}</span>
           </button>
 
+          {/* WebRTC P2P Device Sync Button */}
+          <button
+            onClick={() => setIsSyncOpen(true)}
+            title="Open WebRTC P2P Device Sync"
+            className="px-2.5 py-1.5 rounded-xl border border-emerald-300 dark:border-emerald-800/80 bg-emerald-50 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs"
+          >
+            <ArrowRightLeft className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+            <span className="hidden sm:inline">P2P Sync</span>
+          </button>
+
           {/* PWA Install Button */}
           <PWAInstallButton variant="header" />
 
@@ -1440,6 +1463,7 @@ export default function App() {
           onAudioUploadedInFolder={handleAudioUploadedInFolder}
           onExportStandaloneHtml={handleExportStandaloneHtml}
           onOpenShortcuts={() => setIsShortcutsOpen(true)}
+          onOpenSync={() => setIsSyncOpen(true)}
         />
       ) : (
         /* Workspace View: Split-Screen Editor on Desktop, Tabbed Switcher on Mobile */
@@ -1534,6 +1558,13 @@ export default function App() {
         session={sessions.find((s) => s.id === sessionPendingDeletion) || null}
         onConfirm={handleConfirmDeleteSession}
         onCancel={handleCancelDeleteSession}
+      />
+
+      {/* WebRTC P2P Device Sync Modal */}
+      <SyncPanel
+        isOpen={isSyncOpen}
+        onClose={() => setIsSyncOpen(false)}
+        onSyncCompleted={handleReloadLibrary}
       />
     </div>
   );
