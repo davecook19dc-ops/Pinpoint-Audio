@@ -30,6 +30,23 @@ interface DashboardViewProps {
   onOpenShortcuts: () => void;
 }
 
+function formatDateTime(timestamp: number): string {
+  if (!timestamp || isNaN(timestamp)) return '';
+  const date = new Date(timestamp);
+  try {
+    return new Intl.DateTimeFormat('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true,
+    }).format(date).replace(',', ' •');
+  } catch {
+    return date.toLocaleDateString();
+  }
+}
+
 export const DashboardView: React.FC<DashboardViewProps> = ({
   folders,
   sessions,
@@ -171,58 +188,51 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </button>
           </div>
         ) : (
-          <div className="bg-white dark:bg-stone-900 rounded-2xl border border-[#e8e4dc] dark:border-stone-800 overflow-hidden shadow-2xs">
-            <div className="divide-y divide-[#f0ece4] dark:divide-stone-800">
-              {folderSessions.map((session) => (
+          <div className="space-y-3">
+            {folderSessions.map((session) => {
+              const formattedDate = formatDateTime(session.createdAt || session.updatedAt);
+              const durationStr = formatTime(session.duration);
+
+              return (
                 <div
                   key={session.id}
+                  role="button"
+                  tabIndex={0}
                   onClick={() => onOpenSession(session.id)}
-                  className="px-5 py-4 flex items-center justify-between hover:bg-[#faf8f5] dark:hover:bg-stone-800/50 transition-colors cursor-pointer group"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      onOpenSession(session.id);
+                    }
+                  }}
+                  className="flex flex-col w-full p-4 mb-3 text-left transition-all border rounded-lg shadow-sm bg-white border-slate-200 hover:border-slate-300 hover:shadow-md dark:bg-slate-800 dark:border-slate-700 dark:hover:border-slate-600 focus:outline-none focus:ring-2 focus:ring-amber-500 cursor-pointer group"
                 >
-                  <div className="flex items-center gap-3.5 min-w-0 pr-4">
-                    <div className="w-9 h-9 rounded-xl bg-[#f5f2eb] dark:bg-stone-800 text-stone-700 dark:text-stone-300 flex items-center justify-center shrink-0 group-hover:bg-indigo-600 group-hover:text-white transition-colors shadow-2xs">
-                      <Play className="w-3.5 h-3.5 fill-current" />
-                    </div>
-                    <div className="min-w-0">
-                      <h4 className="text-xs font-bold text-stone-900 dark:text-white truncate group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">
+                  {/* Top Row: Title & Action Controls */}
+                  <div className="flex items-center justify-between gap-3 min-w-0">
+                    <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                      <div className="w-8 h-8 rounded-lg bg-indigo-50 dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shrink-0 group-hover:bg-indigo-600 group-hover:text-white transition-colors">
+                        <Play className="w-3.5 h-3.5 fill-current" />
+                      </div>
+                      <h4 className="font-semibold text-slate-900 dark:text-slate-100 truncate text-sm sm:text-base group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">
                         {session.title}
                       </h4>
-                      <p className="text-[11px] text-stone-500 dark:text-stone-400 font-mono">
-                        {session.audioFileName || 'Voice Recording'}
-                      </p>
                     </div>
-                  </div>
 
-                  <div className="flex items-center gap-5 shrink-0">
-                    <span className="inline-flex items-center gap-1 text-xs font-mono text-stone-600 dark:text-stone-400 tabular-nums">
-                      <Clock className="w-3 h-3 text-stone-400" />
-                      <span>{formatTime(session.duration)}</span>
-                    </span>
-
-                    <span className="hidden sm:inline text-xs text-stone-500 dark:text-stone-400 font-mono">
-                      {new Date(session.updatedAt).toLocaleDateString([], {
-                        month: 'short',
-                        day: 'numeric',
-                      })}
-                    </span>
-
-                    <div className="flex items-center gap-1.5">
+                    {/* Quick Action Buttons */}
+                    <div
+                      className="flex items-center gap-1.5 shrink-0"
+                      onClick={(e) => e.stopPropagation()}
+                    >
                       <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onOpenSession(session.id);
-                        }}
-                        className="py-1 px-3 bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-600 hover:text-white rounded-lg text-xs font-semibold transition-colors cursor-pointer"
+                        onClick={() => onOpenSession(session.id)}
+                        className="py-1 px-2.5 bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-600 hover:text-white rounded-lg text-xs font-semibold transition-colors cursor-pointer"
                       >
                         Open Editor
                       </button>
 
                       {/* Download MP3 Button */}
                       <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleDownloadMp3(session);
-                        }}
+                        onClick={() => handleDownloadMp3(session)}
                         disabled={!session.audioBlob || downloadingMp3SessionId === session.id}
                         title={
                           downloadingMp3SessionId === session.id
@@ -231,7 +241,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                             ? 'Download recording as MP3'
                             : 'No audio available'
                         }
-                        className="p-1.5 text-stone-500 hover:text-indigo-600 hover:bg-[#edeae3] dark:hover:bg-stone-800 rounded-lg transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-wait"
+                        className="p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-wait"
                       >
                         {downloadingMp3SessionId === session.id ? (
                           <Loader2 className="w-4 h-4 text-indigo-600 animate-spin" />
@@ -242,20 +252,29 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
                       {/* Delete Session Button */}
                       <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onDeleteSession(session.id);
-                        }}
+                        onClick={() => onDeleteSession(session.id)}
                         title="Delete recording"
-                        className="p-1.5 text-stone-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg transition-colors cursor-pointer"
+                        className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg transition-colors cursor-pointer"
                       >
                         <Trash2 className="w-4 h-4" />
                       </button>
                     </div>
                   </div>
+
+                  {/* Bottom Row: Metadata (Date/Time Left, Duration Right) */}
+                  <div className="flex justify-between items-center mt-2 text-sm text-slate-500 dark:text-slate-400">
+                    <div className="flex items-center gap-1.5 truncate">
+                      <Clock className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                      <span className="truncate">{formattedDate}</span>
+                    </div>
+
+                    <span className="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-700/80 text-slate-700 dark:text-slate-300 font-mono text-xs font-bold border border-slate-200 dark:border-slate-600/60 shrink-0 tabular-nums">
+                      {durationStr}
+                    </span>
+                  </div>
                 </div>
-              ))}
-            </div>
+              );
+            })}
           </div>
         )}
       </div>
