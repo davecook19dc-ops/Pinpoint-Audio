@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { dbService } from './services/db';
 import { transcriptionService, TranscriptionProgress } from './services/transcriptionService';
-import { AppSettings, CalloutType, Folder, FontMode, Note, Session, SessionImage, ThemeMode } from './types';
+import { AppSettings, CalloutType, Folder, FontMode, Note, Session, SessionImage, ThemeMode, TranscriptionChunk } from './types';
 import { formatTime, seedInitialDataIfNeeded } from './utils/audio';
 import { generateStandaloneHtml } from './utils/exportHtml';
+import { parsePdfSlides } from './utils/pdfParser';
 import { Sidebar } from './components/Sidebar';
 import { AudioPlayer } from './components/AudioPlayer';
 import { NotesFeed } from './components/NotesFeed';
@@ -712,7 +713,11 @@ export default function App() {
     }
   };
 
-  const handleSaveTranscript = async (transcriptText: string, sessionId?: string) => {
+  const handleSaveTranscript = async (
+    transcriptText: string,
+    chunks?: TranscriptionChunk[],
+    sessionId?: string
+  ) => {
     const targetId = sessionId || currentSessionId;
     if (!targetId) return;
 
@@ -722,6 +727,7 @@ export default function App() {
     const updatedSession: Session = {
       ...targetSession,
       transcript: transcriptText,
+      chunks: chunks || targetSession.chunks,
       updatedAt: Date.now(),
     };
 
@@ -742,6 +748,47 @@ export default function App() {
         : currentTime > 0
         ? Math.round(currentTime)
         : undefined;
+
+    const isPdf =
+      file.name.toLowerCase().endsWith('.pdf') ||
+      file.type === 'application/pdf';
+
+    if (isPdf) {
+      showToast(`Extracting pages from PDF "${file.name}"...`);
+      try {
+        const extracted = await parsePdfSlides(file);
+        if (extracted.length === 0) {
+          showToast('No pages found in PDF.');
+          return;
+        }
+
+        const newSlides: SessionImage[] = extracted.map((s, idx) => ({
+          id: `slide-${Date.now()}-${idx}-${Math.random().toString(36).substring(2, 7)}`,
+          blob: s.blob,
+          name: s.name,
+          timestamp: targetTimestamp,
+          createdAt: Date.now() + idx,
+        }));
+
+        const currentImages = session.images || [];
+        const updatedSession: Session = {
+          ...session,
+          images: [...currentImages, ...newSlides],
+          updatedAt: Date.now(),
+        };
+
+        await dbService.saveSession(updatedSession);
+        setSessions((prev) =>
+          prev.map((s) => (s.id === updatedSession.id ? updatedSession : s))
+        );
+        showToast(`Imported ${newSlides.length} PDF page${newSlides.length > 1 ? 's' : ''}!`);
+        return;
+      } catch (err) {
+        console.error('Failed to parse PDF:', err);
+        showToast('Could not extract pages from PDF.');
+        return;
+      }
+    }
 
     const newSlide: SessionImage = {
       id: `slide-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
@@ -809,6 +856,16 @@ export default function App() {
     }
   };
 
+  const handleUpdateSlideAnnotation = async (slideId: string, annotationDataUrl?: string) => {
+    if (!currentSessionId) return;
+    const updated = await dbService.updateSlideAnnotation(currentSessionId, slideId, annotationDataUrl);
+    if (updated) {
+      setSessions((prev) =>
+        prev.map((s) => (s.id === currentSessionId ? updated : s))
+      );
+    }
+  };
+
   const handleUpdateSessionTitle = async (sessionId: string, newTitle: string) => {
     const updated = await dbService.updateSessionTitle(sessionId, newTitle);
     if (updated) {
@@ -847,8 +904,8 @@ export default function App() {
           if (progress.detail) {
             setTranscriptionDetail(progress.detail);
           }
-          if (typeof progress.elapsedSeconds === 'number') {
-            setTranscriptionElapsed(progress.elapsedSeconds);
+          if (typeof progress.elapsedTime === 'number') {
+            setTranscriptionElapsed(progress.elapsedTime);
           }
           if (typeof progress.estimatedTimeRemaining === 'number') {
             setTranscriptionEta(progress.estimatedTimeRemaining);
@@ -881,8 +938,8 @@ export default function App() {
         formattedTranscript = `[00:00] ${cleanText}`;
       }
 
-      // Save directly to session transcript
-      await handleSaveTranscript(formattedTranscript);
+      // Save directly to session transcript and chunks
+      await handleSaveTranscript(formattedTranscript, result.chunks);
 
       showToast('Audio transcribed successfully! Saved to transcript tab.');
     } catch (err: unknown) {
@@ -1131,13 +1188,14 @@ export default function App() {
   const themeClasses: Record<ThemeMode, string> = {
     light: 'bg-neutral-50 text-neutral-900',
     dark: 'dark bg-neutral-950 text-neutral-100',
-    sepia: 'bg-[#F4ECD8] text-[#272016]',
+    sepia: 'sepia bg-[#F4ECD8] text-[#272016]',
   };
 
   const fontClass = settings.fontMode === 'dyslexic' ? 'font-dyslexic' : 'font-standard';
 
   return (
     <div
+      data-theme={settings.theme}
       className={`w-screen h-screen flex flex-col overflow-hidden ${
         themeClasses[settings.theme] || themeClasses.light
       } ${fontClass}`}
@@ -1415,6 +1473,7 @@ export default function App() {
               onUploadSlide={handleUploadSlide}
               onDeleteSlide={handleDeleteSlide}
               onUpdateSlideTimestamp={handleUpdateSlideTimestamp}
+              onUpdateSlideAnnotation={handleUpdateSlideAnnotation}
             />
           </div>
         </div>

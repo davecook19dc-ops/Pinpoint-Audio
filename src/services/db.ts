@@ -102,6 +102,25 @@ class IndexedDBStorage {
     return updated;
   }
 
+  async updateSlideAnnotation(
+    sessionId: string,
+    slideId: string,
+    annotationDataUrl?: string
+  ): Promise<Session | undefined> {
+    const session = await this.getSession(sessionId);
+    if (!session || !session.images) return undefined;
+    const updatedImages = session.images.map((img) =>
+      img.id === slideId ? { ...img, annotationDataUrl } : img
+    );
+    const updated: Session = {
+      ...session,
+      images: updatedImages,
+      updatedAt: Date.now(),
+    };
+    await this.saveSession(updated);
+    return updated;
+  }
+
   async deleteSession(id: string): Promise<void> {
     const db = await this.getDB();
     return new Promise((resolve, reject) => {
@@ -263,6 +282,7 @@ class IndexedDBStorage {
                 createdAt: img.createdAt,
                 imageBase64,
                 mimeType: img.blob.type || 'image/jpeg',
+                annotationDataUrl: img.annotationDataUrl,
               };
             })
           );
@@ -338,6 +358,7 @@ class IndexedDBStorage {
             timestamp: rawImg.timestamp,
             createdAt: rawImg.createdAt,
             blob: imgBlob,
+            annotationDataUrl: rawImg.annotationDataUrl,
           };
         });
       }

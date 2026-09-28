@@ -612,7 +612,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
             </button>
           </div>
         ) : (
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-3 md:grid-cols-4 gap-2">
             <button
               onClick={() => startRecording('mic')}
               className="py-2.5 px-2 bg-neutral-900 hover:bg-neutral-800 dark:bg-neutral-100 dark:hover:bg-white text-white dark:text-neutral-900 font-medium rounded-lg text-xs flex flex-col sm:flex-row items-center justify-center gap-1.5 transition-colors shadow-sm cursor-pointer whitespace-nowrap"
@@ -624,7 +624,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
 
             <button
               onClick={() => startRecording('meeting')}
-              className="py-2.5 px-2 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-lg text-xs flex flex-col sm:flex-row items-center justify-center gap-1.5 transition-colors shadow-sm cursor-pointer whitespace-nowrap"
+              className="hidden md:flex py-2.5 px-2 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-lg text-xs flex-col sm:flex-row items-center justify-center gap-1.5 transition-colors shadow-sm cursor-pointer whitespace-nowrap"
               title="Record Meeting: Captures Teams / Zoom / Tab system audio + your microphone mixed together"
             >
               <Monitor className="w-4 h-4 text-white shrink-0" />
@@ -663,7 +663,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
             <input
               ref={slideFileInputRef}
               type="file"
-              accept="image/*"
+              accept="image/*,application/pdf"
               multiple
               className="hidden"
               onChange={(e) => {

@@ -18,6 +18,12 @@ export interface SessionImage {
   name: string;
   timestamp?: number; // linked audio timestamp in seconds
   createdAt: number;
+  annotationDataUrl?: string; // canvas drawing overlay layer
+}
+
+export interface TranscriptionChunk {
+  timestamp: [number, number]; // [startSec, endSec]
+  text: string;
 }
 
 export interface Session {
@@ -31,6 +37,7 @@ export interface Session {
   audioMimeType?: string;
   audioFileName?: string;
   transcript?: string;
+  chunks?: TranscriptionChunk[];
   images?: SessionImage[];
 }
 
@@ -58,6 +65,7 @@ export interface SerializedSessionImage {
   createdAt: number;
   imageBase64?: string;
   mimeType?: string;
+  annotationDataUrl?: string;
 }
 
 export interface ExportDataPayload {

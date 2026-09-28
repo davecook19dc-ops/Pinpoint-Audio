@@ -17,6 +17,44 @@
   font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
 }
 
+/* Sepia Theme Global Adaptations */
+.sepia {
+  background-color: #f4ecd8 !important;
+  color: #272016 !important;
+}
+
+.sepia .bg-white,
+.sepia .bg-\[\#fcfbf9\],
+.sepia .bg-\[\#faf8f5\],
+.sepia .bg-\[\#f3ede4\] {
+  background-color: #ede3cb !important;
+}
+
+.sepia .bg-stone-50,
+.sepia .bg-neutral-50 {
+  background-color: #e5dac1 !important;
+}
+
+.sepia .border-stone-200,
+.sepia .border-stone-300,
+.sepia .border-\[\#e8e4dc\],
+.sepia .border-\[\#e4ded5\] {
+  border-color: #d2c3a5 !important;
+}
+
+.sepia .text-stone-900,
+.sepia .text-neutral-900,
+.sepia .text-stone-800,
+.sepia .text-neutral-800 {
+  color: #272016 !important;
+}
+
+.sepia .text-stone-600,
+.sepia .text-stone-500,
+.sepia .text-neutral-500 {
+  color: #5c4e38 !important;
+}
+
 /* Custom scrollbars for clean distraction-free UI */
 ::-webkit-scrollbar {
   width: 6px;

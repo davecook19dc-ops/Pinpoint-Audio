@@ -19,7 +19,7 @@ export async function generateStandaloneHtml(
     });
   }
 
-  const imagesData: Array<{ id: string; name: string; timestamp?: number; dataUrl: string }> = [];
+  const imagesData: Array<{ id: string; name: string; timestamp?: number; dataUrl: string; annotationDataUrl?: string }> = [];
   if (session.images && session.images.length > 0) {
     for (const img of session.images) {
       if (img.blob) {
@@ -33,6 +33,7 @@ export async function generateStandaloneHtml(
           name: img.name,
           timestamp: img.timestamp,
           dataUrl,
+          annotationDataUrl: img.annotationDataUrl,
         });
       }
     }
@@ -320,7 +321,10 @@ export async function generateStandaloneHtml(
         <span id="lightboxSlideTitle" class="text-xs font-semibold truncate"></span>
         <button onclick="closeSlideLightbox()" class="text-white hover:text-neutral-300 p-1 rounded-lg">✕</button>
       </div>
-      <img id="lightboxSlideImg" src="" alt="Slide Preview" class="max-h-[80vh] max-w-full object-contain rounded-lg shadow-2xl"/>
+      <div class="relative max-h-[80vh] max-w-full flex items-center justify-center">
+        <img id="lightboxSlideImg" src="" alt="Slide Preview" class="max-h-[80vh] max-w-full object-contain rounded-lg shadow-2xl"/>
+        <img id="lightboxAnnotationImg" src="" alt="Annotations" class="hidden absolute inset-0 w-full h-full object-contain pointer-events-none"/>
+      </div>
     </div>
   </div>
 
@@ -702,7 +706,10 @@ export async function generateStandaloneHtml(
 
       list.innerHTML = slides.map(s => \`
         <div class="relative group rounded-lg border border-neutral-200 overflow-hidden bg-white shadow-xs">
-          <img src="\${s.dataUrl}" alt="\${escapeHtml(s.name)}" onclick="openSlideLightbox('\${s.id}')" class="w-full h-20 object-cover cursor-pointer group-hover:scale-105 transition-transform"/>
+          <div class="relative w-full h-20 overflow-hidden cursor-pointer" onclick="openSlideLightbox('\${s.id}')">
+            <img src="\${s.dataUrl}" alt="\${escapeHtml(s.name)}" class="w-full h-full object-cover group-hover:scale-105 transition-transform"/>
+            \${s.annotationDataUrl ? \`<img src="\${s.annotationDataUrl}" alt="Annotations" class="absolute inset-0 w-full h-full object-cover pointer-events-none"/>\` : ''}
+          </div>
           <div class="p-1.5 flex items-center justify-between text-[10px] bg-white">
             <span class="truncate font-medium text-neutral-700 max-w-[70px]">\${escapeHtml(s.name)}</span>
             \${typeof s.timestamp === 'number' ? \`
@@ -720,6 +727,16 @@ export async function generateStandaloneHtml(
       if (!slide) return;
       document.getElementById('lightboxSlideTitle').innerText = slide.name;
       document.getElementById('lightboxSlideImg').src = slide.dataUrl;
+
+      const annotImg = document.getElementById('lightboxAnnotationImg');
+      if (slide.annotationDataUrl) {
+        annotImg.src = slide.annotationDataUrl;
+        annotImg.classList.remove('hidden');
+      } else {
+        annotImg.src = '';
+        annotImg.classList.add('hidden');
+      }
+
       document.getElementById('slideLightbox').classList.remove('hidden');
     }
 

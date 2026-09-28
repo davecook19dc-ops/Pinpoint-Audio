@@ -52,6 +52,7 @@ interface NotesFeedProps {
   onUploadSlide?: (file: File, timestamp?: number) => void;
   onDeleteSlide?: (slideId: string) => void;
   onUpdateSlideTimestamp?: (slideId: string, timestamp?: number) => void;
+  onUpdateSlideAnnotation?: (slideId: string, annotationDataUrl?: string) => void;
 }
 
 export const NotesFeed: React.FC<NotesFeedProps> = ({
@@ -70,6 +71,7 @@ export const NotesFeed: React.FC<NotesFeedProps> = ({
   onUploadSlide,
   onDeleteSlide,
   onUpdateSlideTimestamp,
+  onUpdateSlideAnnotation,
 }) => {
   // Active right panel view: 'notes' | 'transcript' | 'slides'
   const [activeTab, setActiveTab] = useState<'notes' | 'transcript' | 'slides'>('notes');
@@ -836,77 +838,32 @@ export const NotesFeed: React.FC<NotesFeedProps> = ({
                   )}
                 </div>
 
-                {/* Parsed Interactive Segments */}
+                {/* Parsed Interactive Segments or Chunks */}
                 <div className="space-y-2">
-                  {getParsedTranscriptSegments(currentSession.transcript).map((seg) => (
-                    <div
-                      key={seg.id}
-                      className="group p-3 rounded-2xl bg-[#faf8f5] dark:bg-stone-900/60 hover:bg-white dark:hover:bg-stone-900 border border-[#e8e4dc] dark:border-stone-800 hover:border-indigo-200 dark:hover:border-indigo-900/80 transition-all shadow-2xs relative"
-                    >
-                      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-2">
-                        {/* Sentence / Segment Text */}
-                        <div className="flex-1 min-w-0 flex items-start gap-2">
-                          {seg.timeLabel && (
-                            <button
-                              type="button"
-                              onClick={() => onSeek(seg.timestamp)}
-                              title={`Jump audio to ${seg.timeLabel}`}
-                              className="mt-0.5 inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-stone-900 dark:bg-stone-100 text-white dark:text-stone-900 font-mono text-[11px] font-semibold hover:bg-indigo-600 hover:text-white transition-colors cursor-pointer shrink-0 shadow-2xs"
-                            >
-                              <Play className="w-2.5 h-2.5 fill-current" />
-                              <span>[{seg.timeLabel}]</span>
-                            </button>
-                          )}
-                          <p className="text-sm text-stone-900 dark:text-stone-100 leading-relaxed font-normal whitespace-pre-wrap select-text">
-                            {seg.text}
-                          </p>
-                        </div>
-
-                        {/* Quick Transfer Actions (Visible on hover on desktop, always accessible) */}
-                        <div className="flex items-center gap-1 shrink-0 pt-1 sm:pt-0 opacity-80 sm:opacity-0 group-hover:opacity-100 transition-opacity select-none">
-                          <button
-                            type="button"
-                            onClick={() => handleTransferSnippet(seg.text, seg.timestamp, 'note')}
-                            title="Add entire sentence as Note"
-                            className="px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-[#faf8f5] hover:bg-stone-200 dark:bg-stone-800 dark:hover:bg-stone-700 text-stone-800 dark:text-stone-200 border border-stone-300 dark:border-stone-700 transition-colors shadow-2xs flex items-center gap-0.5 cursor-pointer active:scale-95"
-                          >
-                            <span>📝</span>
-                            <span>Note</span>
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => handleTransferSnippet(seg.text, seg.timestamp, 'key_point')}
-                            title="Add entire sentence as Key Point"
-                            className="px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-[#fef3c7] hover:bg-[#fde68a] dark:bg-amber-950/70 dark:hover:bg-amber-900 text-amber-950 dark:text-amber-200 border border-amber-300 dark:border-amber-800 transition-colors shadow-2xs flex items-center gap-0.5 cursor-pointer active:scale-95"
-                          >
-                            <span>💡</span>
-                            <span>Key</span>
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => handleTransferSnippet(seg.text, seg.timestamp, 'task')}
-                            title="Add entire sentence as Task"
-                            className="px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-[#dcfce7] hover:bg-[#bbf7d0] dark:bg-emerald-950/70 dark:hover:bg-emerald-900 text-emerald-950 dark:text-emerald-200 border border-emerald-300 dark:border-emerald-800 transition-colors shadow-2xs flex items-center gap-0.5 cursor-pointer active:scale-95"
-                          >
-                            <span>✅</span>
-                            <span>Task</span>
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => handleTransferSnippet(seg.text, seg.timestamp, 'question_to_ask')}
-                            title="Add entire sentence as Question"
-                            className="px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-[#f3e8ff] hover:bg-[#e9d5ff] dark:bg-purple-950/70 dark:hover:bg-purple-900 text-purple-950 dark:text-purple-200 border border-purple-300 dark:border-purple-800 transition-colors shadow-2xs flex items-center gap-0.5 cursor-pointer active:scale-95"
-                          >
-                            <span>❓</span>
-                            <span>Q</span>
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
+                  {currentSession.chunks && currentSession.chunks.length > 0 ? (
+                    currentSession.chunks.map((chunk, idx) => (
+                      <TranscriptChunkItem
+                        key={`chunk-${idx}`}
+                        chunk={chunk}
+                        currentTime={currentTime}
+                        onSeek={onSeek}
+                        onTransfer={handleTransferSnippet}
+                      />
+                    ))
+                  ) : (
+                    getParsedTranscriptSegments(currentSession.transcript).map((seg) => (
+                      <TranscriptChunkItem
+                        key={seg.id}
+                        chunk={{
+                          timestamp: [seg.timestamp, seg.timestamp + 2],
+                          text: seg.text,
+                        }}
+                        currentTime={currentTime}
+                        onSeek={onSeek}
+                        onTransfer={handleTransferSnippet}
+                      />
+                    ))
+                  )}
                 </div>
 
                 {/* Floating Selection Popover Menu */}
@@ -1022,6 +979,9 @@ export const NotesFeed: React.FC<NotesFeedProps> = ({
               }}
               onUpdateSlideTimestamp={(slideId, timestamp) => {
                 if (onUpdateSlideTimestamp) onUpdateSlideTimestamp(slideId, timestamp);
+              }}
+              onUpdateSlideAnnotation={(slideId, annotationDataUrl) => {
+                if (onUpdateSlideAnnotation) onUpdateSlideAnnotation(slideId, annotationDataUrl);
               }}
             />
           </div>
@@ -1282,6 +1242,105 @@ export const NotesFeed: React.FC<NotesFeedProps> = ({
           </div>
         </div>
       )}
+    </div>
+  );
+};
+
+interface TranscriptChunkItemProps {
+  chunk: { timestamp: [number, number]; text: string };
+  currentTime: number;
+  onSeek: (time: number) => void;
+  onTransfer: (text: string, timestamp: number, type: CalloutType) => void;
+}
+
+const TranscriptChunkItem: React.FC<TranscriptChunkItemProps> = ({
+  chunk,
+  currentTime,
+  onSeek,
+  onTransfer,
+}) => {
+  const [start, end] = chunk.timestamp;
+  const isActive = currentTime >= start && currentTime <= (end ?? start + 2);
+  const activeRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (isActive && activeRef.current) {
+      activeRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }, [isActive]);
+
+  return (
+    <div
+      ref={isActive ? activeRef : undefined}
+      onClick={() => onSeek(start)}
+      className={`group p-3 rounded-2xl border transition-all duration-150 cursor-pointer shadow-2xs relative ${
+        isActive
+          ? 'bg-amber-100 dark:bg-amber-950/60 border-l-4 border-amber-500 font-medium px-2.5 py-1.5 rounded transition-colors duration-150 ring-1 ring-amber-500/50 shadow-md'
+          : 'bg-[#faf8f5] dark:bg-stone-900/60 hover:bg-white dark:hover:bg-stone-900 border-[#e8e4dc] dark:border-stone-800 hover:border-indigo-200 dark:hover:border-indigo-900/80'
+      }`}
+    >
+      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-2">
+        <div className="flex-1 min-w-0 flex items-start gap-2">
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onSeek(start);
+            }}
+            title={`Jump audio to ${formatTime(start)}`}
+            className="mt-0.5 inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-stone-900 dark:bg-stone-100 text-white dark:text-stone-900 font-mono text-[11px] font-semibold hover:bg-indigo-600 hover:text-white transition-colors cursor-pointer shrink-0 shadow-2xs"
+          >
+            <Play className="w-2.5 h-2.5 fill-current" />
+            <span>[{formatTime(start)}]</span>
+          </button>
+          <p className="text-sm text-stone-900 dark:text-stone-100 leading-relaxed font-normal whitespace-pre-wrap select-text">
+            {chunk.text.trim()}
+          </p>
+        </div>
+
+        {/* Quick Transfer Actions */}
+        <div
+          onClick={(e) => e.stopPropagation()}
+          className="flex items-center gap-1 shrink-0 pt-1 sm:pt-0 opacity-80 sm:opacity-0 group-hover:opacity-100 transition-opacity select-none"
+        >
+          <button
+            type="button"
+            onClick={() => onTransfer(chunk.text, start, 'note')}
+            title="Add entire chunk as Note"
+            className="px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-[#faf8f5] hover:bg-stone-200 dark:bg-stone-800 dark:hover:bg-stone-700 text-stone-800 dark:text-stone-200 border border-stone-300 dark:border-stone-700 transition-colors shadow-2xs flex items-center gap-0.5 cursor-pointer active:scale-95"
+          >
+            <span>📝</span>
+            <span>Note</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => onTransfer(chunk.text, start, 'key_point')}
+            title="Add entire chunk as Key Point"
+            className="px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-[#fef3c7] hover:bg-[#fde68a] dark:bg-amber-950/70 dark:hover:bg-amber-900 text-amber-950 dark:text-amber-200 border border-amber-300 dark:border-amber-800 transition-colors shadow-2xs flex items-center gap-0.5 cursor-pointer active:scale-95"
+          >
+            <span>💡</span>
+            <span>Key</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => onTransfer(chunk.text, start, 'task')}
+            title="Add entire chunk as Task"
+            className="px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-[#dcfce7] hover:bg-[#bbf7d0] dark:bg-emerald-950/70 dark:hover:bg-emerald-900 text-emerald-950 dark:text-emerald-200 border border-emerald-300 dark:border-emerald-800 transition-colors shadow-2xs flex items-center gap-0.5 cursor-pointer active:scale-95"
+          >
+            <span>✅</span>
+            <span>Task</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => onTransfer(chunk.text, start, 'question_to_ask')}
+            title="Add entire chunk as Question"
+            className="px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-[#f3e8ff] hover:bg-[#e9d5ff] dark:bg-purple-950/70 dark:hover:bg-purple-900 text-purple-950 dark:text-purple-200 border border-purple-300 dark:border-purple-800 transition-colors shadow-2xs flex items-center gap-0.5 cursor-pointer active:scale-95"
+          >
+            <span>❓</span>
+            <span>Q</span>
+          </button>
+        </div>
+      </div>
     </div>
   );
 };
