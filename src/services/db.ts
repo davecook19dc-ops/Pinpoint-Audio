@@ -90,6 +90,18 @@ class IndexedDBStorage {
     });
   }
 
+  async updateSessionTitle(sessionId: string, newTitle: string): Promise<Session | undefined> {
+    const session = await this.getSession(sessionId);
+    if (!session) return undefined;
+    const updated: Session = {
+      ...session,
+      title: newTitle.trim() || 'Untitled Session',
+      updatedAt: Date.now(),
+    };
+    await this.saveSession(updated);
+    return updated;
+  }
+
   async deleteSession(id: string): Promise<void> {
     const db = await this.getDB();
     return new Promise((resolve, reject) => {
@@ -231,13 +243,31 @@ class IndexedDBStorage {
     const folders = await this.getAllFolders();
     const sessions = await this.getAllSessions();
     
-    // Convert audio blobs to base64 for portable JSON export
+    // Convert audio blobs and slide image blobs to base64 for portable JSON export
     const serializableSessions = await Promise.all(
       sessions.map(async (sess) => {
         let audioBase64: string | undefined = undefined;
         if (sess.audioBlob) {
           audioBase64 = await blobToBase64(sess.audioBlob);
         }
+
+        let serializedImages: any[] | undefined = undefined;
+        if (sess.images && sess.images.length > 0) {
+          serializedImages = await Promise.all(
+            sess.images.map(async (img) => {
+              const imageBase64 = await blobToBase64(img.blob);
+              return {
+                id: img.id,
+                name: img.name,
+                timestamp: img.timestamp,
+                createdAt: img.createdAt,
+                imageBase64,
+                mimeType: img.blob.type || 'image/jpeg',
+              };
+            })
+          );
+        }
+
         return {
           id: sess.id,
           title: sess.title,
@@ -249,6 +279,7 @@ class IndexedDBStorage {
           audioFileName: sess.audioFileName,
           transcript: sess.transcript,
           audioBase64,
+          images: serializedImages,
         };
       })
     );
@@ -294,6 +325,23 @@ class IndexedDBStorage {
       if (rawSession.audioBase64) {
         audioBlob = base64ToBlob(rawSession.audioBase64, rawSession.audioMimeType || 'audio/webm');
       }
+
+      let restoredImages: any[] | undefined = undefined;
+      if (rawSession.images && Array.isArray(rawSession.images)) {
+        restoredImages = rawSession.images.map((rawImg) => {
+          const imgBlob = rawImg.imageBase64
+            ? base64ToBlob(rawImg.imageBase64, rawImg.mimeType || 'image/jpeg')
+            : new Blob();
+          return {
+            id: rawImg.id,
+            name: rawImg.name,
+            timestamp: rawImg.timestamp,
+            createdAt: rawImg.createdAt,
+            blob: imgBlob,
+          };
+        });
+      }
+
       const session: Session = {
         id: rawSession.id,
         title: rawSession.title,
@@ -305,6 +353,7 @@ class IndexedDBStorage {
         audioMimeType: rawSession.audioMimeType,
         audioFileName: rawSession.audioFileName,
         transcript: (rawSession as { transcript?: string }).transcript,
+        images: restoredImages,
       };
       sessionStore.put(session);
     }

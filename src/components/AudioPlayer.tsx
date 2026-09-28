@@ -20,6 +20,11 @@ import {
   Monitor,
   Download,
   RotateCw,
+  Image as ImageIcon,
+  Paperclip,
+  X,
+  Edit2,
+  Check,
 } from 'lucide-react';
 import { Note, Session } from '../types';
 import { formatTime, downloadAudioAsMp3 } from '../utils/audio';
@@ -54,6 +59,9 @@ interface AudioPlayerProps {
   onTranscribeAudio?: () => void;
   onCancelTranscription?: () => void;
   onSaveTranscript?: (transcript: string) => void;
+  onUploadSlide?: (file: File) => void;
+  onOpenSlides?: () => void;
+  onUpdateTitle?: (newTitle: string) => void;
 }
 
 export const AudioPlayer: React.FC<AudioPlayerProps> = ({
@@ -85,13 +93,49 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
   onTranscribeAudio,
   onCancelTranscription,
   onSaveTranscript,
+  onUploadSlide,
+  onOpenSlides,
+  onUpdateTitle,
 }) => {
+  // Session Title inline editing state
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [titleInput, setTitleInput] = useState(currentSession?.title || '');
+  const titleInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    setTitleInput(currentSession?.title || '');
+    setIsEditingTitle(false);
+  }, [currentSession?.id, currentSession?.title]);
+
+  useEffect(() => {
+    if (isEditingTitle) {
+      titleInputRef.current?.focus();
+      titleInputRef.current?.select();
+    }
+  }, [isEditingTitle]);
+
+  const handleSaveTitle = () => {
+    const trimmed = titleInput.trim();
+    if (trimmed && trimmed !== currentSession?.title && onUpdateTitle) {
+      onUpdateTitle(trimmed);
+    } else {
+      setTitleInput(currentSession?.title || '');
+    }
+    setIsEditingTitle(false);
+  };
+
+  const handleCancelTitle = () => {
+    setTitleInput(currentSession?.title || '');
+    setIsEditingTitle(false);
+  };
+
   // Recording state
   const [isRecording, setIsRecording] = useState(false);
   const [recordingMode, setRecordingMode] = useState<'mic' | 'meeting'>('mic');
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const [micError, setMicError] = useState<string | null>(null);
   const [recordingNotice, setRecordingNotice] = useState<string | null>(null);
+  const [showMobileMeetingNotice, setShowMobileMeetingNotice] = useState(false);
 
   // References for recording
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -105,6 +149,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
   const animFrameRef = useRef<number | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const slideFileInputRef = useRef<HTMLInputElement | null>(null);
 
   // Timeline hover state
   const [hoveredTime, setHoveredTime] = useState<number | null>(null);
@@ -164,6 +209,18 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
     setRecordingNotice(null);
     setRecordingMode(mode);
 
+    // Mobile Environment Check: mobile browsers do not support getDisplayMedia system audio
+    const isMobileDevice =
+      typeof window !== 'undefined' &&
+      (/android|iphone|ipad|ipod|mobile/i.test(navigator.userAgent) ||
+        !navigator.mediaDevices ||
+        !navigator.mediaDevices.getDisplayMedia);
+
+    if (mode === 'meeting' && isMobileDevice) {
+      setShowMobileMeetingNotice(true);
+      return;
+    }
+
     try {
       let streamToRecord: MediaStream;
       const audioCtx = new (window.AudioContext ||
@@ -178,7 +235,8 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
 
       if (mode === 'meeting') {
         if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
-          throw new Error('Screen and system audio capture is not supported in this browser.');
+          setShowMobileMeetingNotice(true);
+          return;
         }
 
         // 1. Request screen/system audio
@@ -442,9 +500,74 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
             </button>
           )}
         </div>
-        <h2 className="text-lg font-bold tracking-tight text-stone-900 dark:text-white truncate">
-          {currentSession ? currentSession.title : 'No Session Selected'}
-        </h2>
+        {isEditingTitle && currentSession ? (
+          <div className="flex items-center gap-1.5 mt-0.5">
+            <input
+              ref={titleInputRef}
+              type="text"
+              value={titleInput}
+              onChange={(e) => setTitleInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  handleSaveTitle();
+                } else if (e.key === 'Escape') {
+                  e.preventDefault();
+                  handleCancelTitle();
+                }
+              }}
+              onBlur={handleSaveTitle}
+              placeholder="Session title..."
+              className="flex-1 text-base font-bold px-2.5 py-1 rounded-xl border border-indigo-500 bg-white dark:bg-stone-800 text-stone-900 dark:text-stone-100 shadow-2xs focus:outline-hidden focus:ring-2 focus:ring-indigo-500/20"
+            />
+            <button
+              type="button"
+              onMouseDown={(e) => {
+                e.preventDefault();
+                handleSaveTitle();
+              }}
+              title="Save Title (Enter)"
+              className="p-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white shadow-2xs transition-colors cursor-pointer shrink-0"
+            >
+              <Check className="w-4 h-4" />
+            </button>
+            <button
+              type="button"
+              onMouseDown={(e) => {
+                e.preventDefault();
+                handleCancelTitle();
+              }}
+              title="Cancel (Esc)"
+              className="p-1.5 rounded-xl bg-stone-100 dark:bg-stone-800 hover:bg-stone-200 dark:hover:bg-stone-700 text-stone-600 dark:text-stone-300 transition-colors cursor-pointer shrink-0"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2 group">
+            <h2
+              onClick={() => {
+                if (currentSession) setIsEditingTitle(true);
+              }}
+              title={currentSession ? 'Click to edit title' : ''}
+              className={`text-lg font-bold tracking-tight text-stone-900 dark:text-white truncate ${
+                currentSession ? 'cursor-pointer hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors' : ''
+              }`}
+            >
+              {currentSession ? currentSession.title : 'No Session Selected'}
+            </h2>
+            {currentSession && (
+              <button
+                type="button"
+                onClick={() => setIsEditingTitle(true)}
+                title="Edit session title"
+                className="p-1 rounded-lg text-stone-400 hover:text-stone-700 dark:hover:text-stone-200 hover:bg-[#edeae3] dark:hover:bg-stone-800 transition-colors cursor-pointer shrink-0 opacity-70 group-hover:opacity-100"
+              >
+                <Edit2 className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Recording & Input Action Zone */}
@@ -514,7 +637,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
               title="Upload audio file"
             >
               <Upload className="w-4 h-4 text-indigo-500 shrink-0" />
-              <span className="truncate">Upload</span>
+              <span className="truncate">Audio</span>
             </button>
             <input
               ref={fileInputRef}
@@ -522,6 +645,35 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
               accept="audio/*"
               className="hidden"
               onChange={handleFileUpload}
+            />
+
+            <button
+              onClick={() => slideFileInputRef.current?.click()}
+              className="py-2.5 px-2 bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-800 dark:text-neutral-200 font-medium rounded-lg text-xs flex flex-col sm:flex-row items-center justify-center gap-1.5 transition-colors cursor-pointer border border-neutral-200 dark:border-neutral-700 whitespace-nowrap relative"
+              title="Attach slide or image to current session"
+            >
+              <ImageIcon className="w-4 h-4 text-amber-500 shrink-0" />
+              <span className="truncate">Slide</span>
+              {currentSession?.images && currentSession.images.length > 0 && (
+                <span className="absolute -top-1.5 -right-1.5 px-1.5 py-0.2 rounded-full bg-amber-500 text-white font-mono text-[9px] font-bold">
+                  {currentSession.images.length}
+                </span>
+              )}
+            </button>
+            <input
+              ref={slideFileInputRef}
+              type="file"
+              accept="image/*"
+              multiple
+              className="hidden"
+              onChange={(e) => {
+                if (e.target.files && e.target.files.length > 0) {
+                  Array.from(e.target.files).forEach((file) => {
+                    if (onUploadSlide) onUploadSlide(file);
+                  });
+                  e.target.value = '';
+                }
+              }}
             />
           </div>
         )}
@@ -929,6 +1081,78 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
               </span>
             )}
           </button>
+        </div>
+      )}
+
+      {/* Mobile Meeting Recording Guidance Modal */}
+      {showMobileMeetingNotice && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-150"
+          onClick={() => setShowMobileMeetingNotice(false)}
+        >
+          <div
+            className="w-full max-w-md bg-[#fcfbf9] dark:bg-stone-900 rounded-2xl shadow-2xl border border-[#e8e4dc] dark:border-stone-800 p-5 overflow-hidden flex flex-col space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between pb-2 border-b border-[#e8e4dc] dark:border-stone-800">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 flex items-center justify-center text-base shadow-2xs">
+                  📱
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-stone-900 dark:text-stone-100">
+                    Mobile Browser Notice
+                  </h3>
+                  <p className="text-[11px] text-stone-500 dark:text-stone-400">
+                    Meeting &amp; System Audio Recording
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowMobileMeetingNotice(false)}
+                className="p-1 rounded-lg text-stone-400 hover:text-stone-600 dark:hover:text-stone-200 cursor-pointer"
+                title="Close"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-3.5 rounded-xl bg-[#fffbeb] dark:bg-amber-950/30 border border-[#fde68a] dark:border-amber-800/60 text-xs text-stone-800 dark:text-stone-200 leading-relaxed space-y-2">
+              <p className="font-semibold text-slate-800 dark:text-stone-100">
+                Screen and system audio recording isn't supported on mobile web browsers. Please use 'Record Mic' to capture room audio directly, or upload a pre-recorded audio file instead!
+              </p>
+              <p className="text-[11px] text-stone-600 dark:text-stone-400">
+                Mobile operating systems (iOS and Android) restrict background system audio capture in web browsers for privacy and security reasons.
+              </p>
+            </div>
+
+            <div className="flex flex-col sm:flex-row items-center gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowMobileMeetingNotice(false);
+                  startRecording('mic');
+                }}
+                className="w-full sm:flex-1 py-2.5 px-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors shadow-2xs cursor-pointer"
+              >
+                <Mic className="w-3.5 h-3.5" />
+                <span>Record Mic Instead</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setShowMobileMeetingNotice(false);
+                  fileInputRef.current?.click();
+                }}
+                className="w-full sm:w-auto py-2.5 px-3 rounded-xl bg-white dark:bg-stone-800 hover:bg-[#f0ece4] dark:hover:bg-stone-700 text-stone-800 dark:text-stone-200 border border-[#e8e4dc] dark:border-stone-700 text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer shadow-2xs"
+              >
+                <Upload className="w-3.5 h-3.5 text-indigo-500" />
+                <span>Upload Audio</span>
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

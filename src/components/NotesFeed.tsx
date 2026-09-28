@@ -17,10 +17,18 @@ import {
   Download,
   RotateCcw,
   Calendar,
+  Image as ImageIcon,
+  CheckCircle2,
+  ArrowRight,
+  Plus,
+  ListTodo,
+  Lightbulb,
+  HelpCircle,
 } from 'lucide-react';
 import { CalloutType, Note, Session } from '../types';
 import { formatTime } from '../utils/audio';
 import { CALLOUT_CONFIGS, CalloutTag } from './CalloutBadge';
+import { SlidesViewer } from './SlidesViewer';
 
 interface NotesFeedProps {
   currentSession: Session | null;
@@ -41,6 +49,9 @@ interface NotesFeedProps {
   isTranscribing?: boolean;
   onSaveTranscript?: (transcript: string) => void;
   onBackToRecording?: () => void;
+  onUploadSlide?: (file: File, timestamp?: number) => void;
+  onDeleteSlide?: (slideId: string) => void;
+  onUpdateSlideTimestamp?: (slideId: string, timestamp?: number) => void;
 }
 
 export const NotesFeed: React.FC<NotesFeedProps> = ({
@@ -56,9 +67,12 @@ export const NotesFeed: React.FC<NotesFeedProps> = ({
   onTranscribeAudio,
   isTranscribing = false,
   onBackToRecording,
+  onUploadSlide,
+  onDeleteSlide,
+  onUpdateSlideTimestamp,
 }) => {
-  // Active right panel view: 'notes' or 'transcript'
-  const [activeTab, setActiveTab] = useState<'notes' | 'transcript'>('notes');
+  // Active right panel view: 'notes' | 'transcript' | 'slides'
+  const [activeTab, setActiveTab] = useState<'notes' | 'transcript' | 'slides'>('notes');
 
   // Floating Overlay Composer state
   const [isComposerOpen, setIsComposerOpen] = useState(false);
@@ -83,8 +97,23 @@ export const NotesFeed: React.FC<NotesFeedProps> = ({
   // Copy feedback state for transcript
   const [hasCopiedTranscript, setHasCopiedTranscript] = useState(false);
 
+  // Floating Selection & Transfer State for Transcript
+  const [selectionMenu, setSelectionMenu] = useState<{
+    text: string;
+    timestamp: number;
+    x: number;
+    y: number;
+  } | null>(null);
+  const [transferToast, setTransferToast] = useState<{
+    type: CalloutType;
+    text: string;
+    timestamp: number;
+  } | null>(null);
+
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const transcriptContainerRef = useRef<HTMLDivElement | null>(null);
+  const toastTimeoutRef = useRef<number | null>(null);
 
   const CALLOUT_TYPES: CalloutType[] = [
     'note',
@@ -289,6 +318,118 @@ export const NotesFeed: React.FC<NotesFeedProps> = ({
     a.download = `${currentSession.title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}_transcript.txt`;
     a.click();
     URL.revokeObjectURL(url);
+  };
+
+  const handleTranscriptSelectionChange = () => {
+    const selection = window.getSelection();
+    if (!selection || selection.isCollapsed) {
+      setSelectionMenu(null);
+      return;
+    }
+
+    const rawText = selection.toString().trim();
+    if (!rawText || rawText.length < 2) {
+      setSelectionMenu(null);
+      return;
+    }
+
+    if (
+      transcriptContainerRef.current &&
+      !transcriptContainerRef.current.contains(selection.anchorNode)
+    ) {
+      setSelectionMenu(null);
+      return;
+    }
+
+    const range = selection.getRangeAt(0);
+    const rect = range.getBoundingClientRect();
+
+    // Look for a timestamp inside selected text or immediately before it
+    let detectedTimestamp = currentTime;
+    const directMatch = rawText.match(/\[(\d{1,2}:\d{2}(?::\d{2})?)/);
+    if (directMatch) {
+      detectedTimestamp = parseTimestampToSeconds(directMatch[1]);
+    } else if (currentSession?.transcript) {
+      const fullText = currentSession.transcript;
+      const idx = fullText.indexOf(rawText);
+      if (idx > 0) {
+        const preceding = fullText.substring(Math.max(0, idx - 300), idx);
+        const lastTsMatch = [...preceding.matchAll(/\[(\d{1,2}:\d{2}(?::\d{2})?)/g)].pop();
+        if (lastTsMatch) {
+          detectedTimestamp = parseTimestampToSeconds(lastTsMatch[1]);
+        }
+      }
+    }
+
+    const cleanedText = rawText.replace(/^\[\d{1,2}:\d{2}(?::\d{2})?(?:\s*-\s*\d{1,2}:\d{2}(?::\d{2})?)?\]\s*/, '');
+    const menuWidth = 340;
+    const x = Math.max(12, Math.min(window.innerWidth - menuWidth - 12, rect.left + rect.width / 2 - menuWidth / 2));
+    const y = Math.max(12, rect.top - 52);
+
+    setSelectionMenu({
+      text: cleanedText,
+      timestamp: detectedTimestamp,
+      x,
+      y,
+    });
+  };
+
+  const handleTransferSnippet = (text: string, timestamp: number, type: CalloutType) => {
+    const clean = text.trim().replace(/^\[\d{1,2}:\d{2}(?::\d{2})?(?:\s*-\s*\d{1,2}:\d{2}(?::\d{2})?)?\]\s*/, '');
+    if (!clean) return;
+
+    onAddNote(clean, timestamp, type);
+
+    const cfg = CALLOUT_CONFIGS[type];
+    setTransferToast({
+      type,
+      text: `Added as ${cfg.label}!`,
+      timestamp,
+    });
+
+    if (window.getSelection()) {
+      window.getSelection()?.removeAllRanges();
+    }
+    setSelectionMenu(null);
+
+    if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
+    toastTimeoutRef.current = window.setTimeout(() => {
+      setTransferToast(null);
+    }, 2800);
+  };
+
+  // Structured transcript line parser for interactive segment cards
+  interface ParsedSegment {
+    id: string;
+    raw: string;
+    text: string;
+    timestamp: number;
+    timeLabel?: string;
+  }
+
+  const getParsedTranscriptSegments = (transcript: string): ParsedSegment[] => {
+    if (!transcript) return [];
+    const rawLines = transcript.split(/\r?\n+/).filter((l) => l.trim().length > 0);
+    return rawLines.map((line, idx) => {
+      const match = line.match(/^\[(\d{1,2}:\d{2}(?::\d{2})?)(?:\s*-\s*\d{1,2}:\d{2}(?::\d{2})?)?\]\s*(.*)$/);
+      if (match) {
+        return {
+          id: `seg-${idx}`,
+          raw: line,
+          timeLabel: match[1],
+          timestamp: parseTimestampToSeconds(match[1]),
+          text: match[2] || line,
+        };
+      }
+      const embedded = line.match(/\[(\d{1,2}:\d{2}(?::\d{2})?)/);
+      return {
+        id: `seg-${idx}`,
+        raw: line,
+        timeLabel: embedded ? embedded[1] : undefined,
+        timestamp: embedded ? parseTimestampToSeconds(embedded[1]) : currentTime,
+        text: line,
+      };
+    });
   };
 
   // Filter notes
@@ -606,7 +747,7 @@ export const NotesFeed: React.FC<NotesFeedProps> = ({
               )}
             </div>
           </>
-        ) : (
+        ) : activeTab === 'transcript' ? (
           /* ========================================================================= */
           /* DEDICATED TRANSCRIPT VIEW                                                 */
           /* ========================================================================= */
@@ -673,16 +814,166 @@ export const NotesFeed: React.FC<NotesFeedProps> = ({
 
             {/* Transcript Body Area */}
             {currentSession?.transcript ? (
-              <div className="flex-1 overflow-y-auto pr-2 space-y-4 min-h-0">
-                <div className="p-4 rounded-2xl bg-[#faf8f5] dark:bg-stone-900/60 border border-[#e8e4dc] dark:border-stone-800">
-                  <div className="text-sm text-stone-900 dark:text-stone-100 leading-relaxed select-text font-normal">
-                    {renderFormattedContent(
-                      currentSession.transcript,
-                      onSeek,
-                      'text-sm text-stone-900 dark:text-stone-100'
-                    )}
+              <div
+                ref={transcriptContainerRef}
+                onMouseUp={handleTranscriptSelectionChange}
+                onTouchEnd={handleTranscriptSelectionChange}
+                onKeyUp={handleTranscriptSelectionChange}
+                className="flex-1 overflow-y-auto pr-2 space-y-3 min-h-0 relative select-text"
+              >
+                {/* Tip Header Banner */}
+                <div className="p-2.5 rounded-xl bg-indigo-50/80 dark:bg-indigo-950/30 border border-indigo-200/80 dark:border-indigo-800/60 text-xs text-indigo-900 dark:text-indigo-200 flex items-center justify-between gap-2 shadow-2xs select-none">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-sm">✨</span>
+                    <span>
+                      <strong className="font-semibold">Click-to-Transfer:</strong> Highlight any text or click the quick tags next to sentences to send snippets directly to your Notes.
+                    </span>
                   </div>
+                  {transferToast && (
+                    <span className="shrink-0 px-2 py-0.5 rounded-md bg-emerald-600 text-white font-mono text-[10px] font-bold animate-pulse">
+                      {transferToast.text}
+                    </span>
+                  )}
                 </div>
+
+                {/* Parsed Interactive Segments */}
+                <div className="space-y-2">
+                  {getParsedTranscriptSegments(currentSession.transcript).map((seg) => (
+                    <div
+                      key={seg.id}
+                      className="group p-3 rounded-2xl bg-[#faf8f5] dark:bg-stone-900/60 hover:bg-white dark:hover:bg-stone-900 border border-[#e8e4dc] dark:border-stone-800 hover:border-indigo-200 dark:hover:border-indigo-900/80 transition-all shadow-2xs relative"
+                    >
+                      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-2">
+                        {/* Sentence / Segment Text */}
+                        <div className="flex-1 min-w-0 flex items-start gap-2">
+                          {seg.timeLabel && (
+                            <button
+                              type="button"
+                              onClick={() => onSeek(seg.timestamp)}
+                              title={`Jump audio to ${seg.timeLabel}`}
+                              className="mt-0.5 inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-stone-900 dark:bg-stone-100 text-white dark:text-stone-900 font-mono text-[11px] font-semibold hover:bg-indigo-600 hover:text-white transition-colors cursor-pointer shrink-0 shadow-2xs"
+                            >
+                              <Play className="w-2.5 h-2.5 fill-current" />
+                              <span>[{seg.timeLabel}]</span>
+                            </button>
+                          )}
+                          <p className="text-sm text-stone-900 dark:text-stone-100 leading-relaxed font-normal whitespace-pre-wrap select-text">
+                            {seg.text}
+                          </p>
+                        </div>
+
+                        {/* Quick Transfer Actions (Visible on hover on desktop, always accessible) */}
+                        <div className="flex items-center gap-1 shrink-0 pt-1 sm:pt-0 opacity-80 sm:opacity-0 group-hover:opacity-100 transition-opacity select-none">
+                          <button
+                            type="button"
+                            onClick={() => handleTransferSnippet(seg.text, seg.timestamp, 'note')}
+                            title="Add entire sentence as Note"
+                            className="px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-[#faf8f5] hover:bg-stone-200 dark:bg-stone-800 dark:hover:bg-stone-700 text-stone-800 dark:text-stone-200 border border-stone-300 dark:border-stone-700 transition-colors shadow-2xs flex items-center gap-0.5 cursor-pointer active:scale-95"
+                          >
+                            <span>📝</span>
+                            <span>Note</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => handleTransferSnippet(seg.text, seg.timestamp, 'key_point')}
+                            title="Add entire sentence as Key Point"
+                            className="px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-[#fef3c7] hover:bg-[#fde68a] dark:bg-amber-950/70 dark:hover:bg-amber-900 text-amber-950 dark:text-amber-200 border border-amber-300 dark:border-amber-800 transition-colors shadow-2xs flex items-center gap-0.5 cursor-pointer active:scale-95"
+                          >
+                            <span>💡</span>
+                            <span>Key</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => handleTransferSnippet(seg.text, seg.timestamp, 'task')}
+                            title="Add entire sentence as Task"
+                            className="px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-[#dcfce7] hover:bg-[#bbf7d0] dark:bg-emerald-950/70 dark:hover:bg-emerald-900 text-emerald-950 dark:text-emerald-200 border border-emerald-300 dark:border-emerald-800 transition-colors shadow-2xs flex items-center gap-0.5 cursor-pointer active:scale-95"
+                          >
+                            <span>✅</span>
+                            <span>Task</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => handleTransferSnippet(seg.text, seg.timestamp, 'question_to_ask')}
+                            title="Add entire sentence as Question"
+                            className="px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-[#f3e8ff] hover:bg-[#e9d5ff] dark:bg-purple-950/70 dark:hover:bg-purple-900 text-purple-950 dark:text-purple-200 border border-purple-300 dark:border-purple-800 transition-colors shadow-2xs flex items-center gap-0.5 cursor-pointer active:scale-95"
+                          >
+                            <span>❓</span>
+                            <span>Q</span>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Floating Selection Popover Menu */}
+                {selectionMenu && (
+                  <div
+                    id="transcript-floating-menu"
+                    style={{ top: `${selectionMenu.y}px`, left: `${selectionMenu.x}px` }}
+                    className="fixed z-50 flex items-center gap-1 p-1 bg-stone-900/95 dark:bg-stone-100/95 text-white dark:text-stone-900 rounded-xl shadow-2xl border border-stone-700/60 dark:border-stone-200 backdrop-blur-md animate-in fade-in zoom-in-95 duration-100 select-none"
+                  >
+                    <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-stone-800 dark:bg-stone-200 text-stone-300 dark:text-stone-700">
+                      {formatTime(selectionMenu.timestamp)}
+                    </span>
+                    <div className="w-px h-3.5 bg-stone-700 dark:bg-stone-300 mx-0.5" />
+
+                    <button
+                      type="button"
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        handleTransferSnippet(selectionMenu.text, selectionMenu.timestamp, 'note');
+                      }}
+                      className="px-2 py-1 rounded-lg text-[11px] font-bold bg-[#faf8f5] hover:bg-stone-200 text-stone-900 border border-stone-300 transition-colors flex items-center gap-1 shadow-2xs cursor-pointer active:scale-95"
+                      title="Add snippet as Note"
+                    >
+                      <span>📝</span>
+                      <span>Note</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        handleTransferSnippet(selectionMenu.text, selectionMenu.timestamp, 'key_point');
+                      }}
+                      className="px-2 py-1 rounded-lg text-[11px] font-bold bg-[#fef3c7] hover:bg-[#fde68a] text-amber-950 border border-amber-300 transition-colors flex items-center gap-1 shadow-2xs cursor-pointer active:scale-95"
+                      title="Add snippet as Key Point"
+                    >
+                      <span>💡</span>
+                      <span>Key Point</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        handleTransferSnippet(selectionMenu.text, selectionMenu.timestamp, 'task');
+                      }}
+                      className="px-2 py-1 rounded-lg text-[11px] font-bold bg-[#dcfce7] hover:bg-[#bbf7d0] text-emerald-950 border border-emerald-300 transition-colors flex items-center gap-1 shadow-2xs cursor-pointer active:scale-95"
+                      title="Add snippet as Task"
+                    >
+                      <span>✅</span>
+                      <span>Task</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        handleTransferSnippet(selectionMenu.text, selectionMenu.timestamp, 'question_to_ask');
+                      }}
+                      className="px-2 py-1 rounded-lg text-[11px] font-bold bg-[#f3e8ff] hover:bg-[#e9d5ff] text-purple-950 border border-purple-300 transition-colors flex items-center gap-1 shadow-2xs cursor-pointer active:scale-95"
+                      title="Add snippet as Question"
+                    >
+                      <span>❓</span>
+                      <span>Question</span>
+                    </button>
+                  </div>
+                )}
               </div>
             ) : (
               <div className="flex-1 flex flex-col items-center justify-center p-8 text-center border-2 border-dashed border-[#e4ded5] dark:border-stone-800 rounded-2xl bg-[#faf8f5]/60 dark:bg-stone-900/30">
@@ -713,6 +1004,26 @@ export const NotesFeed: React.FC<NotesFeedProps> = ({
                 )}
               </div>
             )}
+          </div>
+        ) : (
+          /* ========================================================================= */
+          /* SLIDES & IMAGES VIEW                                                      */
+          /* ========================================================================= */
+          <div className="flex-1 flex flex-col h-full overflow-hidden">
+            <SlidesViewer
+              currentSession={currentSession}
+              currentTime={currentTime}
+              onSeek={onSeek}
+              onUploadSlide={(file, timestamp) => {
+                if (onUploadSlide) onUploadSlide(file, timestamp);
+              }}
+              onDeleteSlide={(slideId) => {
+                if (onDeleteSlide) onDeleteSlide(slideId);
+              }}
+              onUpdateSlideTimestamp={(slideId, timestamp) => {
+                if (onUpdateSlideTimestamp) onUpdateSlideTimestamp(slideId, timestamp);
+              }}
+            />
           </div>
         )}
       </div>
@@ -758,6 +1069,31 @@ export const NotesFeed: React.FC<NotesFeedProps> = ({
           <AlignLeft className="w-4 h-4" />
           {currentSession?.transcript && (
             <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-emerald-500 ring-2 ring-[#fcfbf9] dark:ring-stone-900" />
+          )}
+        </button>
+
+        {/* Slides & Images View Toggle */}
+        <button
+          type="button"
+          onClick={() => setActiveTab('slides')}
+          title="Lecture Slides & Attached Visuals"
+          className={`p-2 rounded-xl transition-all cursor-pointer relative ${
+            activeTab === 'slides'
+              ? 'bg-indigo-600 text-white shadow-xs'
+              : 'text-stone-600 hover:text-stone-900 dark:hover:text-stone-100 hover:bg-[#edeae3] dark:hover:bg-stone-800'
+          }`}
+        >
+          <ImageIcon className="w-4 h-4" />
+          {currentSession?.images && currentSession.images.length > 0 && (
+            <span
+              className={`absolute -top-1 -right-1 min-w-[14px] h-3.5 px-1 rounded-full text-[9px] font-bold flex items-center justify-center ${
+                activeTab === 'slides'
+                  ? 'bg-stone-900 text-white dark:bg-white dark:text-stone-900'
+                  : 'bg-emerald-600 text-white'
+              }`}
+            >
+              {currentSession.images.length}
+            </span>
           )}
         </button>
 

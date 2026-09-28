@@ -19,12 +19,32 @@ export async function generateStandaloneHtml(
     });
   }
 
+  const imagesData: Array<{ id: string; name: string; timestamp?: number; dataUrl: string }> = [];
+  if (session.images && session.images.length > 0) {
+    for (const img of session.images) {
+      if (img.blob) {
+        const dataUrl = await new Promise<string>((resolve) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result as string);
+          reader.readAsDataURL(img.blob);
+        });
+        imagesData.push({
+          id: img.id,
+          name: img.name,
+          timestamp: img.timestamp,
+          dataUrl,
+        });
+      }
+    }
+  }
+
   const notesJson = JSON.stringify(notes).replace(/</g, '\\u003c');
   const sessionJson = JSON.stringify({
     title: session.title,
     duration: session.duration,
     folder: folderName,
   }).replace(/</g, '\\u003c');
+  const slidesJson = JSON.stringify(imagesData).replace(/</g, '\\u003c');
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -171,6 +191,14 @@ export async function generateStandaloneHtml(
         <h3 class="text-xs font-semibold uppercase tracking-wider text-neutral-400 mb-2">Timeline Markers</h3>
         <div id="markersList" class="space-y-1.5 max-h-60 overflow-y-auto"></div>
       </div>
+
+      <!-- Attached Slides & Visuals -->
+      <div class="pt-3 border-t border-neutral-200">
+        <div class="flex items-center justify-between mb-2">
+          <h3 class="text-xs font-semibold uppercase tracking-wider text-neutral-400">Attached Slides (<span id="slideCount">0</span>)</h3>
+        </div>
+        <div id="slidesList" class="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto"></div>
+      </div>
     </section>
 
     <!-- Right Panel: Notes Feed -->
@@ -285,8 +313,20 @@ export async function generateStandaloneHtml(
     </div>
   </div>
 
+  <!-- Slide Lightbox Modal -->
+  <div id="slideLightbox" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/90 backdrop-blur-sm" onclick="closeSlideLightbox()">
+    <div class="relative max-w-4xl max-h-[90vh] flex flex-col items-center" onclick="event.stopPropagation()">
+      <div class="w-full flex items-center justify-between text-white mb-2">
+        <span id="lightboxSlideTitle" class="text-xs font-semibold truncate"></span>
+        <button onclick="closeSlideLightbox()" class="text-white hover:text-neutral-300 p-1 rounded-lg">✕</button>
+      </div>
+      <img id="lightboxSlideImg" src="" alt="Slide Preview" class="max-h-[80vh] max-w-full object-contain rounded-lg shadow-2xl"/>
+    </div>
+  </div>
+
   <script>
     let notes = ${notesJson};
+    let slides = ${slidesJson};
     const sessionData = ${sessionJson};
     const audio = document.getElementById('mainAudio');
     const playBtn = document.getElementById('playBtn');
@@ -649,6 +689,44 @@ export async function generateStandaloneHtml(
       \`).join('');
     }
 
+    function renderSlides() {
+      const countEl = document.getElementById('slideCount');
+      const list = document.getElementById('slidesList');
+      if (countEl) countEl.innerText = slides.length;
+      if (!list) return;
+
+      if (slides.length === 0) {
+        list.innerHTML = '<div class="col-span-2 text-center py-4 text-[11px] text-neutral-400">No slides attached</div>';
+        return;
+      }
+
+      list.innerHTML = slides.map(s => \`
+        <div class="relative group rounded-lg border border-neutral-200 overflow-hidden bg-white shadow-xs">
+          <img src="\${s.dataUrl}" alt="\${escapeHtml(s.name)}" onclick="openSlideLightbox('\${s.id}')" class="w-full h-20 object-cover cursor-pointer group-hover:scale-105 transition-transform"/>
+          <div class="p-1.5 flex items-center justify-between text-[10px] bg-white">
+            <span class="truncate font-medium text-neutral-700 max-w-[70px]">\${escapeHtml(s.name)}</span>
+            \${typeof s.timestamp === 'number' ? \`
+              <button onclick="jumpToTime(\${s.timestamp})" class="px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-600 font-mono font-bold hover:bg-indigo-100">
+                \${formatTime(s.timestamp)}
+              </button>
+            \` : ''}
+          </div>
+        </div>
+      \`).join('');
+    }
+
+    function openSlideLightbox(slideId) {
+      const slide = slides.find(s => s.id === slideId);
+      if (!slide) return;
+      document.getElementById('lightboxSlideTitle').innerText = slide.name;
+      document.getElementById('lightboxSlideImg').src = slide.dataUrl;
+      document.getElementById('slideLightbox').classList.remove('hidden');
+    }
+
+    function closeSlideLightbox() {
+      document.getElementById('slideLightbox').classList.add('hidden');
+    }
+
     function escapeHtml(text) {
       const div = document.createElement('div');
       div.innerText = text;
@@ -657,6 +735,7 @@ export async function generateStandaloneHtml(
 
     renderNotes();
     renderMarkers();
+    renderSlides();
   </script>
 </body>
 </html>`;

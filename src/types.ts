@@ -12,6 +12,14 @@ export interface Note {
   updatedAt: number;
 }
 
+export interface SessionImage {
+  id: string;
+  blob: Blob;
+  name: string;
+  timestamp?: number; // linked audio timestamp in seconds
+  createdAt: number;
+}
+
 export interface Session {
   id: string;
   title: string;
@@ -23,6 +31,7 @@ export interface Session {
   audioMimeType?: string;
   audioFileName?: string;
   transcript?: string;
+  images?: SessionImage[];
 }
 
 export interface Folder {
@@ -42,11 +51,25 @@ export interface AppSettings {
   isAudioEnhanced?: boolean;
 }
 
+export interface SerializedSessionImage {
+  id: string;
+  name: string;
+  timestamp?: number;
+  createdAt: number;
+  imageBase64?: string;
+  mimeType?: string;
+}
+
 export interface ExportDataPayload {
   version: number;
   exportedAt: string;
   appName: string;
   folders: Folder[];
-  sessions: Array<Omit<Session, 'audioBlob'> & { audioBase64?: string }>;
+  sessions: Array<
+    Omit<Session, 'audioBlob' | 'images'> & {
+      audioBase64?: string;
+      images?: SerializedSessionImage[];
+    }
+  >;
   notes: Note[];
 }

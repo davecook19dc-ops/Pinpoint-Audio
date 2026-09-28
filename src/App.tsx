@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { dbService } from './services/db';
 import { transcriptionService, TranscriptionProgress } from './services/transcriptionService';
-import { AppSettings, CalloutType, Folder, FontMode, Note, Session, ThemeMode } from './types';
+import { AppSettings, CalloutType, Folder, FontMode, Note, Session, SessionImage, ThemeMode } from './types';
 import { formatTime, seedInitialDataIfNeeded } from './utils/audio';
 import { generateStandaloneHtml } from './utils/exportHtml';
 import { Sidebar } from './components/Sidebar';
@@ -25,6 +25,7 @@ import {
   Moon,
   Palette,
   Type,
+  Edit2,
 } from 'lucide-react';
 
 export default function App() {
@@ -730,6 +731,94 @@ export default function App() {
     );
   };
 
+  const handleUploadSlide = async (file: File, timestamp?: number) => {
+    if (!currentSessionId) return;
+    const session = sessions.find((s) => s.id === currentSessionId);
+    if (!session) return;
+
+    const targetTimestamp =
+      typeof timestamp === 'number'
+        ? timestamp
+        : currentTime > 0
+        ? Math.round(currentTime)
+        : undefined;
+
+    const newSlide: SessionImage = {
+      id: `slide-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+      blob: file,
+      name: file.name,
+      timestamp: targetTimestamp,
+      createdAt: Date.now(),
+    };
+
+    const currentImages = session.images || [];
+    const updatedSession: Session = {
+      ...session,
+      images: [...currentImages, newSlide],
+      updatedAt: Date.now(),
+    };
+
+    await dbService.saveSession(updatedSession);
+    setSessions((prev) =>
+      prev.map((s) => (s.id === updatedSession.id ? updatedSession : s))
+    );
+    showToast(`Attached slide "${file.name}"`);
+  };
+
+  const handleDeleteSlide = async (slideId: string) => {
+    if (!currentSessionId) return;
+    const session = sessions.find((s) => s.id === currentSessionId);
+    if (!session || !session.images) return;
+
+    const updatedImages = session.images.filter((img) => img.id !== slideId);
+    const updatedSession: Session = {
+      ...session,
+      images: updatedImages,
+      updatedAt: Date.now(),
+    };
+
+    await dbService.saveSession(updatedSession);
+    setSessions((prev) =>
+      prev.map((s) => (s.id === updatedSession.id ? updatedSession : s))
+    );
+    showToast('Slide removed');
+  };
+
+  const handleUpdateSlideTimestamp = async (slideId: string, timestamp?: number) => {
+    if (!currentSessionId) return;
+    const session = sessions.find((s) => s.id === currentSessionId);
+    if (!session || !session.images) return;
+
+    const updatedImages = session.images.map((img) =>
+      img.id === slideId ? { ...img, timestamp } : img
+    );
+    const updatedSession: Session = {
+      ...session,
+      images: updatedImages,
+      updatedAt: Date.now(),
+    };
+
+    await dbService.saveSession(updatedSession);
+    setSessions((prev) =>
+      prev.map((s) => (s.id === updatedSession.id ? updatedSession : s))
+    );
+    if (typeof timestamp === 'number') {
+      showToast(`Slide linked to ${formatTime(timestamp)}`);
+    } else {
+      showToast('Slide unlinked from timestamp');
+    }
+  };
+
+  const handleUpdateSessionTitle = async (sessionId: string, newTitle: string) => {
+    const updated = await dbService.updateSessionTitle(sessionId, newTitle);
+    if (updated) {
+      setSessions((prev) =>
+        prev.map((s) => (s.id === sessionId ? updated : s))
+      );
+      showToast(`Renamed to "${updated.title}"`);
+    }
+  };
+
   // Local In-Browser Transcription Handler (Transformers.js Whisper via Web Worker)
   const handleTranscribeAudio = async () => {
     if (!currentSession?.audioBlob) {
@@ -1298,6 +1387,12 @@ export default function App() {
               onTranscribeAudio={handleTranscribeAudio}
               onCancelTranscription={handleCancelTranscription}
               onSaveTranscript={handleSaveTranscript}
+              onUploadSlide={handleUploadSlide}
+              onUpdateTitle={(newTitle) => {
+                if (currentSessionId) {
+                  handleUpdateSessionTitle(currentSessionId, newTitle);
+                }
+              }}
             />
           </div>
 
@@ -1317,6 +1412,9 @@ export default function App() {
               isTranscribing={isTranscribing}
               onSaveTranscript={handleSaveTranscript}
               onBackToRecording={() => setShowMobileNotes(false)}
+              onUploadSlide={handleUploadSlide}
+              onDeleteSlide={handleDeleteSlide}
+              onUpdateSlideTimestamp={handleUpdateSlideTimestamp}
             />
           </div>
         </div>
