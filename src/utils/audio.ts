@@ -26,44 +26,88 @@ export function formatTime(totalSeconds: number): string {
   return `${mm}:${ss}`;
 }
 
-/**
- * Loads lamejs library dynamically from CDN if not already present on window.
- */
-function getLameJs(): Promise<any> {
-  if (typeof window !== 'undefined' && (window as any).lamejs) {
-    return Promise.resolve((window as any).lamejs);
-  }
+function createInlineMp3Worker(): Worker {
+  const code = `
+    try {
+      importScripts('https://cdn.jsdelivr.net/npm/lamejs@1.2.1/lame.min.js');
+    } catch (e) {}
 
-  return new Promise((resolve, reject) => {
-    const existing = document.querySelector('script[src*="lamejs"]');
-    if (existing) {
-      existing.addEventListener('load', () => resolve((window as any).lamejs));
-      existing.addEventListener('error', () => reject(new Error('Failed to load lamejs')));
-      return;
-    }
+    self.onmessage = function (e) {
+      const { leftChannel, rightChannel, numChannels, sampleRate, kbps = 128 } = e.data;
+      if (!self.lamejs && typeof lamejs !== 'undefined') {
+        self.lamejs = lamejs;
+      }
+      if (!self.lamejs || !self.lamejs.Mp3Encoder) {
+        self.postMessage({ type: 'error', error: 'lamejs encoder library is not available in worker.' });
+        return;
+      }
+      try {
+        const leftFloat = new Float32Array(leftChannel);
+        const rightFloat = rightChannel ? new Float32Array(rightChannel) : null;
 
-    const script = document.createElement('script');
-    script.src = 'https://cdn.jsdelivr.net/npm/lamejs@1.2.1/lame.min.js';
-    script.onload = () => {
-      if ((window as any).lamejs) {
-        resolve((window as any).lamejs);
-      } else {
-        reject(new Error('lamejs not available on window object'));
+        const mp3encoder = new self.lamejs.Mp3Encoder(numChannels >= 2 ? 2 : 1, sampleRate, kbps);
+        const mp3Data = [];
+
+        const leftInt16 = new Int16Array(leftFloat.length);
+        for (let i = 0; i < leftFloat.length; i++) {
+          const s = Math.max(-1, Math.min(1, leftFloat[i]));
+          leftInt16[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+        }
+
+        let rightInt16 = null;
+        if (rightFloat && rightFloat.length > 0) {
+          rightInt16 = new Int16Array(rightFloat.length);
+          for (let i = 0; i < rightFloat.length; i++) {
+            const s = Math.max(-1, Math.min(1, rightFloat[i]));
+            rightInt16[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+          }
+        }
+
+        const sampleBlockSize = 1152;
+        const totalSamples = leftInt16.length;
+
+        for (let i = 0; i < totalSamples; i += sampleBlockSize) {
+          const leftChunk = leftInt16.subarray(i, i + sampleBlockSize);
+          let mp3buf;
+          if (rightInt16) {
+            const rightChunk = rightInt16.subarray(i, i + sampleBlockSize);
+            mp3buf = mp3encoder.encodeBuffer(leftChunk, rightChunk);
+          } else {
+            mp3buf = mp3encoder.encodeBuffer(leftChunk);
+          }
+          if (mp3buf.length > 0) {
+            mp3Data.push(mp3buf.buffer.slice(mp3buf.byteOffset, mp3buf.byteOffset + mp3buf.byteLength));
+          }
+          if ((i / sampleBlockSize) % 100 === 0) {
+            self.postMessage({ type: 'progress', progress: Math.min(1, i / totalSamples) });
+          }
+        }
+
+        const mp3buf = mp3encoder.flush();
+        if (mp3buf.length > 0) {
+          mp3Data.push(mp3buf.buffer.slice(mp3buf.byteOffset, mp3buf.byteOffset + mp3buf.byteLength));
+        }
+
+        const mp3Blob = new Blob(mp3Data, { type: 'audio/mp3' });
+        self.postMessage({ type: 'complete', blob: mp3Blob });
+      } catch (err) {
+        self.postMessage({ type: 'error', error: err.message || 'MP3 encoding failed' });
       }
     };
-    script.onerror = () => reject(new Error('Could not load lamejs CDN'));
-    document.head.appendChild(script);
-  });
+  `;
+  const blob = new Blob([code], { type: 'application/javascript' });
+  return new Worker(URL.createObjectURL(blob));
 }
 
 /**
- * Converts an audio Blob to an MP3 file client-side using lamejs and triggers native download.
+ * Converts an audio Blob to an MP3 file client-side using a background Web Worker
+ * to prevent UI freezes, then triggers native download via Blob URL.
  */
 export async function downloadAudioAsMp3(
   audioBlob: Blob,
-  rawFileName: string = 'recording'
+  rawFileName: string = 'recording',
+  onProgress?: (progress: number) => void
 ): Promise<void> {
-  const lame = await getLameJs();
   const arrayBuffer = await audioBlob.arrayBuffer();
 
   const AudioCtx =
@@ -82,63 +126,79 @@ export async function downloadAudioAsMp3(
 
   const numChannels = decodedBuffer.numberOfChannels;
   const sampleRate = decodedBuffer.sampleRate;
-  const kbps = 128;
-  const mp3encoder = new lame.Mp3Encoder(numChannels >= 2 ? 2 : 1, sampleRate, kbps);
-  const mp3Data: any[] = [];
-
   const leftChannel = decodedBuffer.getChannelData(0);
   const rightChannel = numChannels >= 2 ? decodedBuffer.getChannelData(1) : null;
 
-  // Convert Float32Array to Int16Array
-  const leftInt16 = new Int16Array(leftChannel.length);
-  for (let i = 0; i < leftChannel.length; i++) {
-    const s = Math.max(-1, Math.min(1, leftChannel[i]));
-    leftInt16[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
-  }
+  // Clone channel data ArrayBuffers for zero-copy transferable postMessage
+  const leftBuffer = leftChannel.buffer.slice(
+    leftChannel.byteOffset,
+    leftChannel.byteOffset + leftChannel.byteLength
+  );
+  let rightBuffer: ArrayBuffer | null = null;
+  const transferables: Transferable[] = [leftBuffer];
 
-  let rightInt16: Int16Array | null = null;
   if (rightChannel) {
-    rightInt16 = new Int16Array(rightChannel.length);
-    for (let i = 0; i < rightChannel.length; i++) {
-      const s = Math.max(-1, Math.min(1, rightChannel[i]));
-      rightInt16[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
-    }
+    rightBuffer = rightChannel.buffer.slice(
+      rightChannel.byteOffset,
+      rightChannel.byteOffset + rightChannel.byteLength
+    );
+    transferables.push(rightBuffer);
   }
 
-  const sampleBlockSize = 1152;
-  for (let i = 0; i < leftInt16.length; i += sampleBlockSize) {
-    const leftChunk = leftInt16.subarray(i, i + sampleBlockSize);
-    let mp3buf: Int8Array | Uint8Array;
-    if (rightInt16) {
-      const rightChunk = rightInt16.subarray(i, i + sampleBlockSize);
-      mp3buf = mp3encoder.encodeBuffer(leftChunk, rightChunk);
-    } else {
-      mp3buf = mp3encoder.encodeBuffer(leftChunk);
+  return new Promise<void>((resolve, reject) => {
+    let worker: Worker;
+    try {
+      worker = new Worker('/mp3EncoderWorker.js');
+    } catch {
+      worker = createInlineMp3Worker();
     }
-    if (mp3buf.length > 0) {
-      mp3Data.push(mp3buf.buffer.slice(mp3buf.byteOffset, mp3buf.byteOffset + mp3buf.byteLength));
-    }
-  }
 
-  const mp3buf = mp3encoder.flush();
-  if (mp3buf.length > 0) {
-    mp3Data.push(mp3buf.buffer.slice(mp3buf.byteOffset, mp3buf.byteOffset + mp3buf.byteLength));
-  }
+    worker.onmessage = (e) => {
+      const { type, blob, progress, error } = e.data;
+      if (type === 'progress') {
+        if (onProgress) onProgress(progress);
+      } else if (type === 'complete' && blob) {
+        try {
+          const downloadUrl = URL.createObjectURL(blob);
+          const cleanTitle = rawFileName
+            .replace(/\.[^/.]+$/, '')
+            .replace(/[^a-zA-Z0-9_-]/g, '_')
+            .toLowerCase();
 
-  const mp3Blob = new Blob(mp3Data, { type: 'audio/mp3' });
-  const downloadUrl = URL.createObjectURL(mp3Blob);
+          const a = document.createElement('a');
+          a.href = downloadUrl;
+          a.download = `${cleanTitle || 'recording'}.mp3`;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          setTimeout(() => URL.revokeObjectURL(downloadUrl), 5000);
+          resolve();
+        } catch (err) {
+          reject(err);
+        } finally {
+          worker.terminate();
+        }
+      } else if (type === 'error') {
+        worker.terminate();
+        reject(new Error(error || 'MP3 encoding failed in background worker'));
+      }
+    };
 
-  const cleanTitle = rawFileName
-    .replace(/\.[^/.]+$/, '')
-    .replace(/[^a-zA-Z0-9_-]/g, '_')
-    .toLowerCase();
+    worker.onerror = (err) => {
+      worker.terminate();
+      reject(new Error(err.message || 'MP3 encoder worker error'));
+    };
 
-  const a = document.createElement('a');
-  a.href = downloadUrl;
-  a.download = `${cleanTitle || 'recording'}.mp3`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  setTimeout(() => URL.revokeObjectURL(downloadUrl), 5000);
+    worker.postMessage(
+      {
+        leftChannel: leftBuffer,
+        rightChannel: rightBuffer,
+        numChannels,
+        sampleRate,
+        kbps: 128,
+      },
+      transferables
+    );
+  });
 }
 

@@ -101,6 +101,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
   // Session Title inline editing state
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [titleInput, setTitleInput] = useState(currentSession?.title || '');
+  const [isConvertingMp3, setIsConvertingMp3] = useState(false);
   const titleInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
@@ -489,15 +490,30 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
           {currentSession?.audioBlob && (
             <button
               onClick={async () => {
-                if (currentSession.audioBlob) {
-                  await downloadAudioAsMp3(currentSession.audioBlob, currentSession.title || 'recording');
+                if (currentSession.audioBlob && !isConvertingMp3) {
+                  try {
+                    setIsConvertingMp3(true);
+                    await downloadAudioAsMp3(currentSession.audioBlob, currentSession.title || 'recording');
+                  } finally {
+                    setIsConvertingMp3(false);
+                  }
                 }
               }}
-              title="Download recording as MP3 file"
-              className="px-2.5 py-1 rounded-lg bg-white dark:bg-stone-800 hover:bg-[#f0ece4] dark:hover:bg-stone-700 border border-[#e8e4dc] dark:border-stone-700 text-stone-800 dark:text-stone-200 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs shrink-0"
+              disabled={isConvertingMp3}
+              title={isConvertingMp3 ? 'Converting audio to MP3 in background worker...' : 'Download recording as MP3 file'}
+              className="px-2.5 py-1 rounded-lg bg-white dark:bg-stone-800 hover:bg-[#f0ece4] dark:hover:bg-stone-700 border border-[#e8e4dc] dark:border-stone-700 text-stone-800 dark:text-stone-200 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs shrink-0 disabled:opacity-60 disabled:cursor-wait"
             >
-              <Download className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
-              <span>Download MP3</span>
+              {isConvertingMp3 ? (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400 animate-spin" />
+                  <span>Converting...</span>
+                </>
+              ) : (
+                <>
+                  <Download className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                  <span>Download MP3</span>
+                </>
+              )}
             </button>
           )}
         </div>

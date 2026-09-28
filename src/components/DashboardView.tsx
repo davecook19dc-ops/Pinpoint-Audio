@@ -9,6 +9,7 @@ import {
   ArrowLeft,
   Search,
   Download,
+  Loader2,
 } from 'lucide-react';
 import { Folder, Session } from '../types';
 import { formatTime, downloadAudioAsMp3 } from '../utils/audio';
@@ -223,10 +224,20 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                           handleDownloadMp3(session);
                         }}
                         disabled={!session.audioBlob || downloadingMp3SessionId === session.id}
-                        title={session.audioBlob ? 'Download recording as MP3' : 'No audio available'}
-                        className="p-1.5 text-stone-500 hover:text-indigo-600 hover:bg-[#edeae3] dark:hover:bg-stone-800 rounded-lg transition-colors cursor-pointer disabled:opacity-30"
+                        title={
+                          downloadingMp3SessionId === session.id
+                            ? 'Converting to MP3 in background worker...'
+                            : session.audioBlob
+                            ? 'Download recording as MP3'
+                            : 'No audio available'
+                        }
+                        className="p-1.5 text-stone-500 hover:text-indigo-600 hover:bg-[#edeae3] dark:hover:bg-stone-800 rounded-lg transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-wait"
                       >
-                        <Download className="w-4 h-4" />
+                        {downloadingMp3SessionId === session.id ? (
+                          <Loader2 className="w-4 h-4 text-indigo-600 animate-spin" />
+                        ) : (
+                          <Download className="w-4 h-4" />
+                        )}
                       </button>
 
                       {/* Delete Session Button */}
