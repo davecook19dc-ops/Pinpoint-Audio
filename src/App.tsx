@@ -1184,6 +1184,17 @@ export default function App() {
     settings.fontMode,
   ]);
 
+  // Sync root element classes with global theme state
+  useEffect(() => {
+    const root = document.documentElement;
+    root.classList.remove('dark', 'sepia');
+    if (settings.theme === 'dark') {
+      root.classList.add('dark');
+    } else if (settings.theme === 'sepia') {
+      root.classList.add('sepia');
+    }
+  }, [settings.theme]);
+
   // Theme styling classes
   const themeClasses: Record<ThemeMode, string> = {
     light: 'bg-neutral-50 text-neutral-900',
