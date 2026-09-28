@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#4F46E5" />
+      <stop offset="100%" stop-color="#6366F1" />
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="12" stdDeviation="16" flood-color="#312E81" flood-opacity="0.35"/>
+    </filter>
+  </defs>
+  <!-- Background with subtle squircle -->
+  <rect width="512" height="512" rx="128" fill="url(#bgGrad)" />
+  
+  <!-- Headphones arc -->
+  <path d="M140 260 C140 160, 210 110, 256 110 C302 110, 372 160, 372 260" fill="none" stroke="#FFFFFF" stroke-width="28" stroke-linecap="round" filter="url(#shadow)" />
+  
+  <!-- Left Ear Cup -->
+  <rect x="116" y="240" width="48" height="96" rx="24" fill="#FFFFFF" filter="url(#shadow)" />
+  <rect x="128" y="256" width="24" height="64" rx="12" fill="#E0E7FF" />
+  
+  <!-- Right Ear Cup -->
+  <rect x="348" y="240" width="48" height="96" rx="24" fill="#FFFFFF" filter="url(#shadow)" />
+  <rect x="360" y="256" width="24" height="64" rx="12" fill="#E0E7FF" />
+
+  <!-- Center Pinpoint & Audio Waveform Element -->
+  <!-- Note Pin Marker -->
+  <circle cx="256" cy="250" r="44" fill="#FBBF24" filter="url(#shadow)" />
+  <circle cx="256" cy="250" r="22" fill="#FFFFFF" />
+  <path d="M256 294 L256 360" stroke="#FBBF24" stroke-width="12" stroke-linecap="round" />
+  
+  <!-- Audio wave pulses below -->
+  <line x1="200" y1="340" x2="200" y2="380" stroke="#A7F3D0" stroke-width="10" stroke-linecap="round" />
+  <line x1="228" y1="320" x2="228" y2="400" stroke="#A7F3D0" stroke-width="10" stroke-linecap="round" />
+  <line x1="284" y1="320" x2="284" y2="400" stroke="#A7F3D0" stroke-width="10" stroke-linecap="round" />
+  <line x1="312" y1="340" x2="312" y2="380" stroke="#A7F3D0" stroke-width="10" stroke-linecap="round" />
+</svg>

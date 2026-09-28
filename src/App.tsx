@@ -10,6 +10,7 @@ import { NotesFeed } from './components/NotesFeed';
 import { DashboardView } from './components/DashboardView';
 import { KeyboardShortcutsModal } from './components/KeyboardShortcutsModal';
 import { ConfirmDeleteModal } from './components/ConfirmDeleteModal';
+import { PWAInstallButton } from './components/PWAInstallButton';
 import {
   Menu,
   Plus,
@@ -1215,6 +1216,9 @@ export default function App() {
             )}
             <span className="hidden sm:inline capitalize">{settings.theme}</span>
           </button>
+
+          {/* PWA Install Button */}
+          <PWAInstallButton variant="header" />
 
           {/* Keyboard Shortcuts Trigger Button */}
           <button

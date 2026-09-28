@@ -10,6 +10,7 @@ import {
   Keyboard,
 } from 'lucide-react';
 import { AppSettings, Folder, Session, ThemeMode } from '../types';
+import { PWAInstallButton } from './PWAInstallButton';
 
 interface SidebarProps {
   folders: Folder[];
@@ -312,8 +313,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
         </div>
 
-        {/* Standalone HTML & Shortcuts Actions */}
+        {/* Standalone HTML, Shortcuts & PWA Install Actions */}
         <div className="pt-2 border-t border-[#e8e4dc] dark:border-stone-800 space-y-1.5">
+          <PWAInstallButton variant="sidebar" />
+
           <button
             onClick={onOpenShortcuts}
             title="Open Keyboard Shortcuts Cheat Sheet (?)"
