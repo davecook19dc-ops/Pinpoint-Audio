@@ -1,4 +1,5 @@
 import { Folder, Note, Session } from '../types';
+import { modifierKey } from './platform';
 
 /**
  * Generates a self-contained, single-file HTML document containing
@@ -286,7 +287,7 @@ export async function generateStandaloneHtml(
         <div class="text-[11px] font-bold text-neutral-400 uppercase tracking-wider pt-2">Notes & Capture</div>
         <div class="flex items-center justify-between p-2 rounded bg-neutral-50">
           <span>Add Note at Current Second</span>
-          <span class="font-mono text-[11px]"><kbd class="px-1.5 py-0.5 bg-white border border-neutral-300 rounded">Ctrl/⌘</kbd> + <kbd class="px-1.5 py-0.5 bg-white border border-neutral-300 rounded">M</kbd></span>
+          <span class="font-mono text-[11px]"><kbd class="px-1.5 py-0.5 bg-white border border-neutral-300 rounded">${modifierKey}</kbd> + <kbd class="px-1.5 py-0.5 bg-white border border-neutral-300 rounded">M</kbd></span>
         </div>
         <div class="flex items-center justify-between p-2 rounded bg-neutral-50">
           <span>Save Current Note</span>

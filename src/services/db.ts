@@ -196,6 +196,20 @@ class IndexedDBStorage {
     });
   }
 
+  async ensureDefaultFolder(): Promise<Folder[]> {
+    const folders = await this.getAllFolders();
+    if (folders.length === 0) {
+      const defaultFolder: Folder = {
+        id: 'lectures-default',
+        name: 'Lectures',
+        color: '#10B981',
+      };
+      await this.saveFolder(defaultFolder);
+      return [defaultFolder];
+    }
+    return folders;
+  }
+
   async saveFolder(folder: Folder): Promise<void> {
     const db = await this.getDB();
     return new Promise((resolve, reject) => {

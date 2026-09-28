@@ -28,6 +28,7 @@ import {
 } from 'lucide-react';
 import { Note, Session } from '../types';
 import { formatTime, downloadAudioAsMp3 } from '../utils/audio';
+import { modifierKey } from '../utils/platform';
 
 interface AudioPlayerProps {
   currentSession: Session | null;
@@ -1017,7 +1018,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
           <div className="flex items-center gap-1.5 bg-indigo-700/60 px-2 py-0.5 rounded text-[11px] font-mono tabular-nums">
             <Clock className="w-3 h-3" />
             <span>{formatTime(currentTime)}</span>
-            <kbd className="ml-1 text-[10px] opacity-75 font-sans">⌘M / Ctrl+M</kbd>
+            <kbd className="ml-1 text-[10px] opacity-75 font-sans">{modifierKey}+M</kbd>
           </div>
         </button>
       </div>

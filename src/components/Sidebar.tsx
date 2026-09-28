@@ -218,7 +218,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <div className="space-y-1">
             {visibleSessions.length === 0 ? (
               <p className="px-2 py-3 text-xs text-stone-400 text-center">
-                No recordings yet
+                No recordings yet. Click the mic to start!
               </p>
             ) : (
               visibleSessions.map((session) => {

@@ -2,7 +2,8 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { dbService } from './services/db';
 import { transcriptionService, TranscriptionProgress } from './services/transcriptionService';
 import { AppSettings, CalloutType, Folder, FontMode, Note, Session, SessionImage, ThemeMode, TranscriptionChunk } from './types';
-import { formatTime, seedInitialDataIfNeeded } from './utils/audio';
+import { formatTime } from './utils/audio';
+import { isApplePlatform, modifierKey } from './utils/platform';
 import { generateStandaloneHtml } from './utils/exportHtml';
 import { parsePdfSlides } from './utils/pdfParser';
 import { Sidebar } from './components/Sidebar';
@@ -178,19 +179,15 @@ export default function App() {
         const loadedSettings = await dbService.getSettings();
         if (isMounted) setSettings(loadedSettings);
 
-        // Seed initial data if empty
-        const initialSession = await seedInitialDataIfNeeded();
-
-        const [loadedFolders, loadedSessions] = await Promise.all([
-          dbService.getAllFolders(),
-          dbService.getAllSessions(),
-        ]);
+        // Ensure default 'Lectures' folder exists
+        const loadedFolders = await dbService.ensureDefaultFolder();
+        const loadedSessions = await dbService.getAllSessions();
 
         if (isMounted) {
           setFolders(loadedFolders);
           setSessions(loadedSessions);
 
-          const targetSessionId = initialSession ? initialSession.id : loadedSessions[0]?.id || null;
+          const targetSessionId = loadedSessions[0]?.id || null;
           setCurrentSessionId(targetSessionId);
 
           if (targetSessionId) {
@@ -342,7 +339,7 @@ export default function App() {
     const newSessionId = `session-${Date.now()}`;
     const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     const dateStr = new Date().toLocaleDateString([], { month: 'short', day: 'numeric' });
-    const folderId = activeFolderId !== 'all' ? activeFolderId : (folders[0]?.id || 'folder-1');
+    const folderId = activeFolderId !== 'all' ? activeFolderId : (folders[0]?.id || 'lectures-default');
     const titlePrefix = mode === 'meeting' ? 'Meeting' : 'Recording';
 
     const newSession: Session = {
@@ -421,7 +418,7 @@ export default function App() {
     const newSession: Session = {
       id: newSessionId,
       title: `Recording ${new Date().toLocaleDateString([], { month: 'short', day: 'numeric' })} (${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})`,
-      folderId: activeFolderId !== 'all' ? activeFolderId : 'folder-1',
+      folderId: activeFolderId !== 'all' ? activeFolderId : (folders[0]?.id || 'lectures-default'),
       createdAt: Date.now(),
       updatedAt: Date.now(),
       duration: safeDuration,
@@ -503,7 +500,7 @@ export default function App() {
       const newSession: Session = {
         id: newSessionId,
         title,
-        folderId: activeFolderId !== 'all' ? activeFolderId : 'folder-1',
+        folderId: activeFolderId !== 'all' ? activeFolderId : (folders[0]?.id || 'lectures-default'),
         createdAt: Date.now(),
         updatedAt: Date.now(),
         duration: audioDuration,
@@ -534,7 +531,7 @@ export default function App() {
     const newSession: Session = {
       id: newSessionId,
       title: `Untitled Session ${sessions.length + 1}`,
-      folderId: activeFolderId !== 'all' ? activeFolderId : 'folder-1',
+      folderId: activeFolderId !== 'all' ? activeFolderId : (folders[0]?.id || 'lectures-default'),
       createdAt: Date.now(),
       updatedAt: Date.now(),
       duration: 0,
@@ -1056,8 +1053,11 @@ export default function App() {
         }
       }
 
+      // Modifier key check based on OS platform
+      const isModifierPressed = isApplePlatform ? e.metaKey : e.ctrlKey;
+
       // 3. Ctrl+M or Cmd+M: capture timestamped note
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'm') {
+      if (isModifierPressed && e.key.toLowerCase() === 'm') {
         e.preventDefault();
         setShowMobileNotes(true);
         setQuickAddTriggered(true);
@@ -1065,7 +1065,7 @@ export default function App() {
       }
 
       // 4. Toggle Dyslexic font mode: Ctrl+D or Cmd+D
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd') {
+      if (isModifierPressed && e.key.toLowerCase() === 'd') {
         e.preventDefault();
         setSettings((prev) => {
           const nextFont: FontMode = prev.fontMode === 'dyslexic' ? 'standard' : 'dyslexic';
@@ -1078,7 +1078,7 @@ export default function App() {
       }
 
       // 5. Toggle theme: Ctrl+B or Cmd+B
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b') {
+      if (isModifierPressed && e.key.toLowerCase() === 'b') {
         e.preventDefault();
         setSettings((prev) => {
           const themes: ThemeMode[] = ['light', 'dark', 'sepia'];
@@ -1383,7 +1383,7 @@ export default function App() {
               <Plus className="w-3.5 h-3.5" />
               <span className="hidden sm:inline">Add Note</span>
               <kbd className="hidden lg:inline text-[10px] bg-indigo-700/80 px-1 py-0.2 rounded font-sans">
-                ⌘M
+                {modifierKey}M
               </kbd>
             </button>
           )}

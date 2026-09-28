@@ -156,7 +156,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               <FolderIcon className="w-6 h-6" />
             </div>
             <h3 className="text-sm font-bold text-stone-900 dark:text-stone-100 mb-1">
-              No recordings in this folder
+              No recordings yet. Click the mic to start!
             </h3>
             <p className="text-xs text-stone-500 dark:text-stone-400 mb-5">
               Upload an audio file or record a new voice memo to get started.

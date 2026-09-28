@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { X, Keyboard, Search, Headphones, FileText, Compass, Eye } from 'lucide-react';
+import { modifierKey } from '../utils/platform';
 
 interface ShortcutItem {
   keys: string[];
@@ -57,7 +58,7 @@ const SHORTCUTS: ShortcutItem[] = [
 
   // Note Taking & Capture
   {
-    keys: ['Ctrl / ⌘', 'M'],
+    keys: [modifierKey, 'M'],
     description: 'Capture timestamped note linked to current audio playback second',
     category: 'notes',
   },
@@ -96,12 +97,12 @@ const SHORTCUTS: ShortcutItem[] = [
     category: 'accessibility',
   },
   {
-    keys: ['Ctrl / ⌘', 'D'],
+    keys: [modifierKey, 'D'],
     description: 'Toggle OpenDyslexic accessible font mode ON / OFF',
     category: 'accessibility',
   },
   {
-    keys: ['Ctrl / ⌘', 'B'],
+    keys: [modifierKey, 'B'],
     description: 'Cycle display themes (Light → Dark → Sepia)',
     category: 'accessibility',
   },

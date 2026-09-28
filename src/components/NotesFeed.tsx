@@ -27,8 +27,10 @@ import {
 } from 'lucide-react';
 import { CalloutType, Note, Session } from '../types';
 import { formatTime } from '../utils/audio';
+import { modifierKey } from '../utils/platform';
 import { CALLOUT_CONFIGS, CalloutTag } from './CalloutBadge';
 import { SlidesViewer } from './SlidesViewer';
+import { KeyPointsPanel } from './KeyPointsPanel';
 
 interface NotesFeedProps {
   currentSession: Session | null;
@@ -549,6 +551,11 @@ export const NotesFeed: React.FC<NotesFeedProps> = ({
               id="notesContainer"
               className="flex-1 overflow-y-auto space-y-3 pr-1 min-h-0"
             >
+              <KeyPointsPanel
+                currentSession={currentSession}
+                onAddNote={onAddNote}
+              />
+
               {filteredNotes.length === 0 ? (
                 <div className="flex flex-col items-center justify-center h-64 border-2 border-dashed border-[#e4ded5] dark:border-stone-800 rounded-2xl p-6 text-center bg-[#faf8f5]/60 dark:bg-stone-900/30">
                   <Sparkles className="w-8 h-8 text-indigo-500 mb-2.5 opacity-80" />
@@ -558,7 +565,7 @@ export const NotesFeed: React.FC<NotesFeedProps> = ({
                   <p className="text-xs text-stone-600 dark:text-stone-400 max-w-sm mb-4 leading-relaxed">
                     Click any pastel callout icon in the right toolbar or press{' '}
                     <kbd className="px-1.5 py-0.5 bg-[#f0ece4] dark:bg-stone-800 rounded text-[11px] font-mono font-semibold">
-                      ⌘M
+                      {modifierKey}M
                     </kbd>{' '}
                     to capture a timestamped note right now.
                   </p>
