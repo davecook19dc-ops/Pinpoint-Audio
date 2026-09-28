@@ -1,0 +1,9 @@
+{
+  "name": "Sonata Notes - Offline Audio & Timestamped Note-Taking",
+  "description": "A private, distraction-free local audio recorder and structured timestamped notebook with callouts, IndexedDB storage, and accessibility modes.",
+  "requestFramePermissions": [
+    "microphone",
+    "display-capture"
+  ],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
