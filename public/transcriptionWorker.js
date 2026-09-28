@@ -14,10 +14,19 @@ class WhisperPipelineSingleton {
 
   static async getInstance(progress_callback = null) {
     if (this.instance === null) {
-      this.instance = await pipeline('automatic-speech-recognition', this.model, {
-        quantized: true,
-        progress_callback,
-      });
+      try {
+        this.instance = await pipeline('automatic-speech-recognition', this.model, {
+          device: 'webgpu',
+          quantized: true,
+          progress_callback,
+        });
+      } catch (err) {
+        console.warn('WebGPU acceleration not supported or failed, falling back to CPU:', err);
+        this.instance = await pipeline('automatic-speech-recognition', this.model, {
+          quantized: true,
+          progress_callback,
+        });
+      }
     }
     return this.instance;
   }

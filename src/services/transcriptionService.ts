@@ -81,10 +81,19 @@ class TranscriptionService {
               try {
                 if (!transcriber) {
                   self.postMessage({ type: 'status', status: 'init', message: 'Loading Whisper-tiny.en model...' });
-                  transcriber = await pipeline('automatic-speech-recognition', 'Xenova/whisper-tiny.en', {
-                    quantized: true,
-                    progress_callback: (p) => self.postMessage({ type: 'download_progress', progressData: p }),
-                  });
+                  try {
+                    transcriber = await pipeline('automatic-speech-recognition', 'Xenova/whisper-tiny.en', {
+                      device: 'webgpu',
+                      quantized: true,
+                      progress_callback: (p) => self.postMessage({ type: 'download_progress', progressData: p }),
+                    });
+                  } catch (webGpuErr) {
+                    console.warn('WebGPU init failed, using CPU fallback:', webGpuErr);
+                    transcriber = await pipeline('automatic-speech-recognition', 'Xenova/whisper-tiny.en', {
+                      quantized: true,
+                      progress_callback: (p) => self.postMessage({ type: 'download_progress', progressData: p }),
+                    });
+                  }
                 }
                 self.postMessage({ type: 'status', status: 'transcribing', message: 'Transcribing speech to text...' });
 

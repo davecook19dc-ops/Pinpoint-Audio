@@ -116,14 +116,9 @@ export const KeyPointsPanel: React.FC<KeyPointsPanelProps> = ({
           <div className="p-2 rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400">
             <Sparkles className="w-4 h-4 animate-pulse" />
           </div>
-          <div>
-            <h4 className="text-xs font-bold text-stone-900 dark:text-white">
-              AI Study Takeaways
-            </h4>
-            <p className="text-[10px] text-stone-500 dark:text-stone-400 font-mono">
-              Offline-first Bart study companion
-            </p>
-          </div>
+          <h4 className="text-xs font-bold text-stone-900 dark:text-white leading-none">
+            AI Study Takeaways
+          </h4>
         </div>
 
         {takeaways && (
