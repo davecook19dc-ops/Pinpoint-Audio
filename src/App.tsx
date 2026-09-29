@@ -14,6 +14,7 @@ import { KeyboardShortcutsModal } from './components/KeyboardShortcutsModal';
 import { ConfirmDeleteModal } from './components/ConfirmDeleteModal';
 import { PWAInstallButton } from './components/PWAInstallButton';
 import { SyncPanel } from './components/SyncPanel';
+import { OnboardingWarning } from './components/OnboardingWarning';
 import {
   Menu,
   Plus,
@@ -179,6 +180,9 @@ export default function App() {
 
     async function initialize() {
       try {
+        // Request persistent storage from browser to prevent eviction under storage pressure
+        await dbService.requestPersistentStorage();
+
         const loadedSettings = await dbService.getSettings();
         if (isMounted) setSettings(loadedSettings);
 
@@ -1566,6 +1570,9 @@ export default function App() {
         onClose={() => setIsSyncOpen(false)}
         onSyncCompleted={handleReloadLibrary}
       />
+
+      {/* First-Time Offline Data Storage Warning Modal */}
+      <OnboardingWarning />
     </div>
   );
 }

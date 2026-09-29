@@ -418,6 +418,39 @@ class IndexedDBStorage {
     }
     return { usedBytes: 0, quotaBytes: 0, percentage: 0 };
   }
+
+  /**
+   * Requests persistent storage from the browser.
+   * If granted, the browser will not automatically clear IndexedDB under storage pressure.
+   */
+  async requestPersistentStorage(): Promise<boolean> {
+    if (typeof window !== 'undefined' && navigator.storage && navigator.storage.persist) {
+      try {
+        const isPersisted = await navigator.storage.persist();
+        console.log(
+          `[Pinpoint Storage] Persistent storage: ${
+            isPersisted ? 'GRANTED (data protected from eviction)' : 'NOT PERSISTED'
+          }`
+        );
+        return isPersisted;
+      } catch (err) {
+        console.warn('[Pinpoint Storage] Error requesting persistent storage:', err);
+        return false;
+      }
+    }
+    return false;
+  }
+
+  async isStoragePersisted(): Promise<boolean> {
+    if (typeof window !== 'undefined' && navigator.storage && navigator.storage.persisted) {
+      try {
+        return await navigator.storage.persisted();
+      } catch {
+        return false;
+      }
+    }
+    return false;
+  }
 }
 
 // Helpers for Blob <-> Base64 conversion

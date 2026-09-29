@@ -790,7 +790,58 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
 
             {/* Post-recording Toolset Quick Bar */}
             <div className="flex flex-wrap items-center gap-2 pt-1.5 border-t border-emerald-500/10">
+              {/* Download MP3 Action */}
               <button
+                type="button"
+                onClick={async () => {
+                  if (currentSession.audioBlob && !isConvertingMp3) {
+                    try {
+                      setIsConvertingMp3(true);
+                      await downloadAudioAsMp3(currentSession.audioBlob, currentSession.title || 'recording');
+                    } finally {
+                      setIsConvertingMp3(false);
+                    }
+                  }
+                }}
+                disabled={isConvertingMp3}
+                title={isConvertingMp3 ? 'Converting audio to MP3...' : 'Download recording as MP3 file'}
+                className="py-1.5 px-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs shrink-0 disabled:opacity-60 disabled:cursor-wait"
+              >
+                {isConvertingMp3 ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Download className="w-3.5 h-3.5" />
+                )}
+                <span>Download MP3</span>
+              </button>
+
+              {/* Transcribe Action */}
+              {onTranscribeAudio && (
+                !isTranscribing ? (
+                  <button
+                    type="button"
+                    onClick={onTranscribeAudio}
+                    title="Transcribe audio with speech recognition"
+                    className="py-1.5 px-2.5 rounded-lg bg-white dark:bg-stone-800 hover:bg-[#f0ece4] dark:hover:bg-stone-700 text-stone-800 dark:text-stone-200 border border-[#e8e4dc] dark:border-stone-700 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs"
+                  >
+                    <Sparkles className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                    <span>Transcribe</span>
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={onCancelTranscription}
+                    className="py-1.5 px-2.5 rounded-lg bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-400 border border-rose-200 dark:border-rose-800 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs"
+                  >
+                    <XCircle className="w-3.5 h-3.5" />
+                    <span>Cancel</span>
+                  </button>
+                )
+              )}
+
+              {/* Attach Slide Action */}
+              <button
+                type="button"
                 onClick={() => slideFileInputRef.current?.click()}
                 className="py-1.5 px-2.5 rounded-lg bg-white dark:bg-stone-800 hover:bg-[#f0ece4] dark:hover:bg-stone-700 text-stone-800 dark:text-stone-200 border border-[#e8e4dc] dark:border-stone-700 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs relative"
                 title="Attach slide or image to this recording"
@@ -818,6 +869,14 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
                   }
                 }}
               />
+            </div>
+
+            {/* Post-Recording Backup Reminder Callout */}
+            <div className="p-3 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200/80 dark:border-amber-800/60 text-xs text-amber-800 dark:text-amber-200 flex items-start gap-2 shadow-2xs leading-relaxed">
+              <span className="shrink-0 text-sm select-none">💡</span>
+              <span>
+                <strong className="font-semibold">Tip:</strong> Always download your MP3 and export your notes as a backup. Since Pinpoint operates entirely offline, your files cannot be recovered if your browser data is cleared.
+              </span>
             </div>
           </div>
         ) : (
