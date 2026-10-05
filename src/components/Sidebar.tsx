@@ -10,6 +10,7 @@ import {
   Keyboard,
   ArrowRightLeft,
   Upload,
+  RotateCcw,
 } from 'lucide-react';
 import { AppSettings, Folder, Session, ThemeMode } from '../types';
 import { PWAInstallButton } from './PWAInstallButton';
@@ -17,14 +18,16 @@ import { PWAInstallButton } from './PWAInstallButton';
 interface SidebarProps {
   folders: Folder[];
   sessions: Session[];
-  activeFolderId: string | 'all';
+  activeFolderId: string | 'all' | 'bin';
   currentSessionId: string | null;
   settings: AppSettings;
   storageUsage: { usedBytes: number; quotaBytes: number; percentage: number };
-  onSelectFolder: (folderId: string | 'all') => void;
+  onSelectFolder: (folderId: string | 'all' | 'bin') => void;
   onSelectSession: (sessionId: string) => void;
   onCreateSession: () => void;
   onDeleteSession: (sessionId: string) => void;
+  onRestoreSession?: (sessionId: string) => void;
+  onHardDeleteSession?: (sessionId: string) => void;
   onCreateFolder: (name: string, color: string) => void;
   onDeleteFolder: (folderId: string) => void;
   onUpdateSettings: (newSettings: Partial<AppSettings>) => void;
@@ -44,6 +47,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onSelectSession,
   onCreateSession,
   onDeleteSession,
+  onRestoreSession,
+  onHardDeleteSession,
   onCreateFolder,
   onDeleteFolder,
   onUpdateSettings,
@@ -65,11 +70,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
     setIsAddingFolder(false);
   };
 
-  // Filter sessions by active folder
+  // Split active sessions vs soft-deleted sessions
+  const activeSessions = sessions.filter((s) => !s.deletedAt);
+  const deletedSessions = sessions.filter((s) => !!s.deletedAt);
+
+  // Filter sessions by active folder or bin
   const visibleSessions =
-    activeFolderId === 'all'
-      ? sessions
-      : sessions.filter((s) => s.folderId === activeFolderId);
+    activeFolderId === 'bin'
+      ? deletedSessions
+      : activeFolderId === 'all'
+      ? activeSessions
+      : activeSessions.filter((s) => s.folderId === activeFolderId);
 
   const folderColors = ['#10B981', '#0EA5E9', '#F59E0B', '#EC4899', '#8B5CF6', '#F97316'];
 
@@ -154,12 +165,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 <Layers className="w-3.5 h-3.5 text-stone-400" />
                 <span className="truncate">All Sessions</span>
               </div>
-              <span className="text-[10px] text-stone-400 font-mono">{sessions.length}</span>
+              <span className="text-[10px] text-stone-400 font-mono">{activeSessions.length}</span>
             </button>
 
             {/* Folder list */}
             {folders.map((folder) => {
-              const count = sessions.filter((s) => s.folderId === folder.id).length;
+              const count = activeSessions.filter((s) => s.folderId === folder.id).length;
               const isSelected = activeFolderId === folder.id;
               return (
                 <div key={folder.id} className="group relative flex items-center">
@@ -191,6 +202,26 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 </div>
               );
             })}
+
+            {/* Bin / Recently Deleted Entry */}
+            <div className="pt-1 mt-1 border-t border-[#f0ece4] dark:border-stone-800/80">
+              <button
+                onClick={() => onSelectFolder('bin')}
+                className={`w-full text-left px-2.5 py-1.5 rounded-xl text-xs font-semibold flex items-center justify-between transition-colors cursor-pointer ${
+                  activeFolderId === 'bin'
+                    ? 'bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 shadow-2xs border border-rose-200/60 dark:border-rose-800/60'
+                    : 'text-stone-700 dark:text-stone-300 hover:bg-[#f0ece4] dark:hover:bg-stone-800'
+                }`}
+              >
+                <div className="flex items-center gap-2 truncate">
+                  <Trash2 className="w-3.5 h-3.5 text-rose-500 shrink-0" />
+                  <span className="truncate">Recently Deleted</span>
+                </div>
+                <span className="text-[10px] text-rose-600 dark:text-rose-400 font-mono font-bold">
+                  {deletedSessions.length}
+                </span>
+              </button>
+            </div>
           </div>
 
           {/* Inline Add Folder Form */}
@@ -239,21 +270,73 @@ export const Sidebar: React.FC<SidebarProps> = ({
           )}
         </div>
 
-        {/* Sessions in Folder */}
+        {/* Sessions in Folder or Bin */}
         <div className="pt-2 border-t border-[#f0ece4] dark:border-stone-800">
-          <div className="px-2 mb-1.5">
+          <div className="px-2 mb-1.5 flex items-center justify-between">
             <span className="text-[11px] font-bold uppercase tracking-wider text-stone-500 dark:text-stone-400">
-              Recordings ({visibleSessions.length})
+              {activeFolderId === 'bin' ? 'Bin Recordings' : 'Recordings'} ({visibleSessions.length})
             </span>
+            {activeFolderId === 'bin' && (
+              <span className="text-[10px] text-amber-600 dark:text-amber-400 font-mono">
+                90d retention
+              </span>
+            )}
           </div>
 
           <div className="space-y-1">
             {visibleSessions.length === 0 ? (
               <p className="px-2 py-3 text-xs text-stone-400 text-center">
-                No recordings yet. Click the mic to start!
+                {activeFolderId === 'bin'
+                  ? 'Bin is empty'
+                  : 'No recordings yet. Click the mic to start!'}
               </p>
             ) : (
               visibleSessions.map((session) => {
+                if (activeFolderId === 'bin') {
+                  const daysLeft = Math.max(
+                    0,
+                    90 -
+                      Math.floor(
+                        (Date.now() - (session.deletedAt || Date.now())) /
+                          (1000 * 60 * 60 * 24)
+                      )
+                  );
+
+                  return (
+                    <div
+                      key={session.id}
+                      className="p-2 rounded-xl border border-stone-200 dark:border-stone-800 bg-white/70 dark:bg-stone-800/60 space-y-1.5 shadow-2xs"
+                    >
+                      <div className="flex items-center justify-between gap-1 text-xs font-semibold text-stone-900 dark:text-white truncate">
+                        <span className="truncate">{session.title}</span>
+                        <span className="px-1.5 py-0.2 rounded bg-amber-100 dark:bg-amber-950/80 text-amber-800 dark:text-amber-300 text-[10px] font-mono shrink-0">
+                          {daysLeft}d left
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-end gap-1.5 pt-1 border-t border-stone-100 dark:border-stone-700/60">
+                        <button
+                          type="button"
+                          onClick={() => onRestoreSession?.(session.id)}
+                          className="px-2 py-0.5 rounded bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 text-[11px] font-semibold flex items-center gap-1 cursor-pointer transition-colors"
+                          title="Restore recording to original folder"
+                        >
+                          <RotateCcw className="w-3 h-3" />
+                          <span>Restore</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => onHardDeleteSession?.(session.id)}
+                          className="px-2 py-0.5 rounded bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 hover:bg-rose-100 text-[11px] font-semibold flex items-center gap-1 cursor-pointer transition-colors"
+                          title="Delete permanently from disk"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                          <span>Delete</span>
+                        </button>
+                      </div>
+                    </div>
+                  );
+                }
+
                 const isSelected = currentSessionId === session.id;
                 return (
                   <div key={session.id} className="group relative flex items-center">
@@ -282,7 +365,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
                     <button
                       onClick={() => onDeleteSession(session.id)}
-                      title="Delete recording"
+                      title="Move to Bin"
                       className="hidden group-hover:block p-1 text-stone-400 hover:text-rose-600 rounded transition-colors mr-1 cursor-pointer"
                     >
                       <Trash2 className="w-3.5 h-3.5" />

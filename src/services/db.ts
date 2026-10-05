@@ -54,6 +54,9 @@ class IndexedDBStorage {
 
   // --- Sessions ---
   async getAllSessions(): Promise<Session[]> {
+    // Run 90-day trash auto-cleanup silently in background
+    this.cleanupExpiredTrash().catch(() => {});
+
     const db = await this.getDB();
     return new Promise((resolve, reject) => {
       const tx = db.transaction('sessions', 'readonly');
@@ -121,7 +124,39 @@ class IndexedDBStorage {
     return updated;
   }
 
+  /**
+   * Soft-delete: Moves session to Bin by marking deletedAt timestamp
+   */
   async deleteSession(id: string): Promise<void> {
+    const session = await this.getSession(id);
+    if (!session) return;
+    const updated: Session = {
+      ...session,
+      deletedAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    await this.saveSession(updated);
+  }
+
+  /**
+   * Restores a soft-deleted session back to its original folder
+   */
+  async restoreSession(id: string): Promise<Session | undefined> {
+    const session = await this.getSession(id);
+    if (!session) return undefined;
+    const updated: Session = {
+      ...session,
+      deletedAt: undefined,
+      updatedAt: Date.now(),
+    };
+    await this.saveSession(updated);
+    return updated;
+  }
+
+  /**
+   * Permanently deletes a session and all its associated notes from object stores
+   */
+  async hardDeleteSession(id: string): Promise<void> {
     const db = await this.getDB();
     return new Promise((resolve, reject) => {
       const tx = db.transaction(['sessions', 'notes'], 'readwrite');
@@ -143,6 +178,33 @@ class IndexedDBStorage {
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
     });
+  }
+
+  /**
+   * Auto-cleanup: Permanently deletes sessions in Bin that have exceeded 90 days
+   */
+  async cleanupExpiredTrash(): Promise<void> {
+    try {
+      const db = await this.getDB();
+      const sessions: Session[] = await new Promise((resolve, reject) => {
+        const tx = db.transaction('sessions', 'readonly');
+        const store = tx.objectStore('sessions');
+        const req = store.getAll();
+        req.onsuccess = () => resolve(req.result || []);
+        req.onerror = () => reject(req.error);
+      });
+
+      const now = Date.now();
+      const ninetyDaysMs = 90 * 24 * 60 * 60 * 1000;
+
+      for (const session of sessions) {
+        if (session.deletedAt && now - session.deletedAt > ninetyDaysMs) {
+          await this.hardDeleteSession(session.id);
+        }
+      }
+    } catch (err) {
+      console.warn('Silent cleanup of expired trash failed:', err);
+    }
   }
 
   // --- Notes ---

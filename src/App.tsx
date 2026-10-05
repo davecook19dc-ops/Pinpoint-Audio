@@ -39,15 +39,16 @@ import { exportSessionToMarkdown, hasSessionExportableContent } from './services
 export default function App() {
   // App Navigation View: 'dashboard' (folder-first grid) vs 'workspace' (split-screen editor)
   const [currentView, setCurrentView] = useState<'dashboard' | 'workspace'>('dashboard');
-  const [selectedFolderForDrilldown, setSelectedFolderForDrilldown] = useState<string | null>(null);
+  const [selectedFolderForDrilldown, setSelectedFolderForDrilldown] = useState<string | null | 'bin'>(null);
 
   // Database entities
   const [folders, setFolders] = useState<Folder[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [notes, setNotes] = useState<Note[]>([]);
-  const [activeFolderId, setActiveFolderId] = useState<string | 'all'>('all');
+  const [activeFolderId, setActiveFolderId] = useState<string | 'all' | 'bin'>('all');
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [sessionPendingDeletion, setSessionPendingDeletion] = useState<string | null>(null);
+  const [isHardDeletePending, setIsHardDeletePending] = useState<boolean>(false);
 
   // App settings & theme
   const [settings, setSettings] = useState<AppSettings>({
@@ -675,21 +676,57 @@ export default function App() {
     };
   };
 
-  // Open custom confirmation modal instead of blocked native window.confirm
+  // Open confirmation modal for soft deletion (move to bin)
   const handleDeleteSession = (sessionId: string) => {
+    setIsHardDeletePending(false);
     setSessionPendingDeletion(sessionId);
+  };
+
+  // Open confirmation modal for permanent hard deletion
+  const handleHardDeleteSession = (sessionId: string) => {
+    setIsHardDeletePending(true);
+    setSessionPendingDeletion(sessionId);
+  };
+
+  // Restore session from Bin back to active folder
+  const handleRestoreSession = async (sessionId: string) => {
+    await dbService.restoreSession(sessionId);
+    const updatedSessions = await dbService.getAllSessions();
+    setSessions(updatedSessions);
+    showToast('Session restored to folder.');
+  };
+
+  // Empty all expired/deleted sessions from Bin
+  const handleEmptyBin = async () => {
+    const deleted = sessions.filter((s) => !!s.deletedAt);
+    if (deleted.length === 0) return;
+    for (const s of deleted) {
+      await dbService.hardDeleteSession(s.id);
+    }
+    const updatedSessions = await dbService.getAllSessions();
+    setSessions(updatedSessions);
+    const usage = await dbService.estimateStorageUsage();
+    setStorageUsage(usage);
+    showToast('Bin emptied successfully.');
   };
 
   const handleConfirmDeleteSession = async () => {
     if (!sessionPendingDeletion) return;
     const sessionId = sessionPendingDeletion;
+    const wasPermanent = isHardDeletePending;
 
-    await dbService.deleteSession(sessionId);
+    if (wasPermanent) {
+      await dbService.hardDeleteSession(sessionId);
+    } else {
+      await dbService.deleteSession(sessionId);
+    }
+
     const updatedSessions = await dbService.getAllSessions();
     setSessions(updatedSessions);
 
     if (currentSessionId === sessionId) {
-      setCurrentSessionId(updatedSessions[0]?.id || null);
+      const activeRemaining = updatedSessions.filter((s) => !s.deletedAt);
+      setCurrentSessionId(activeRemaining[0]?.id || null);
       if (audioUrl) {
         URL.revokeObjectURL(audioUrl);
         setAudioUrl(null);
@@ -701,11 +738,13 @@ export default function App() {
     const usage = await dbService.estimateStorageUsage();
     setStorageUsage(usage);
     setSessionPendingDeletion(null);
-    showToast('Session deleted.');
+    setIsHardDeletePending(false);
+    showToast(wasPermanent ? 'Session permanently deleted.' : 'Session moved to Bin (90-day retention).');
   };
 
   const handleCancelDeleteSession = () => {
     setSessionPendingDeletion(null);
+    setIsHardDeletePending(false);
   };
 
   // 5. Notes management
@@ -1368,7 +1407,7 @@ export default function App() {
             <>
               <span>{folders.length} Folders</span>
               <span aria-hidden="true" className="text-stone-300 dark:text-stone-700">·</span>
-              <span>{sessions.length} Recordings</span>
+              <span>{sessions.filter((s) => !s.deletedAt).length} Recordings</span>
             </>
           )}
         </div>
@@ -1510,6 +1549,9 @@ export default function App() {
           onDeleteFolder={handleDeleteFolder}
           onCreateSessionInFolder={handleCreateSessionInFolder}
           onDeleteSession={handleDeleteSession}
+          onRestoreSession={handleRestoreSession}
+          onHardDeleteSession={handleHardDeleteSession}
+          onEmptyBin={handleEmptyBin}
           onAudioUploadedInFolder={handleAudioUploadedInFolder}
           onImportAudio={handleAudioUploaded}
           onExportStandaloneHtml={handleExportStandaloneHtml}
@@ -1607,6 +1649,7 @@ export default function App() {
       <ConfirmDeleteModal
         isOpen={!!sessionPendingDeletion}
         session={sessions.find((s) => s.id === sessionPendingDeletion) || null}
+        isPermanent={isHardDeletePending}
         onConfirm={handleConfirmDeleteSession}
         onCancel={handleCancelDeleteSession}
       />

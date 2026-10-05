@@ -11,6 +11,7 @@ import {
   Download,
   Loader2,
   ArrowRightLeft,
+  RotateCcw,
 } from 'lucide-react';
 import { Folder, Session } from '../types';
 import { formatTime, downloadNativeAudio } from '../utils/audio';
@@ -18,14 +19,17 @@ import { formatTime, downloadNativeAudio } from '../utils/audio';
 interface DashboardViewProps {
   folders: Folder[];
   sessions: Session[];
-  selectedFolderId: string | null;
+  selectedFolderId: string | null | 'bin';
   storageUsage: { usedBytes: number; quotaBytes: number; percentage: number };
-  onSelectFolder: (folderId: string | null) => void;
+  onSelectFolder: (folderId: string | null | 'bin') => void;
   onOpenSession: (sessionId: string) => void;
   onCreateFolder: (name: string, color: string) => void;
   onDeleteFolder: (folderId: string) => void;
   onCreateSessionInFolder: (folderId: string) => void;
   onDeleteSession: (sessionId: string) => void;
+  onRestoreSession?: (sessionId: string) => void;
+  onHardDeleteSession?: (sessionId: string) => void;
+  onEmptyBin?: () => void;
   onAudioUploadedInFolder: (folderId: string, file: File) => void;
   onImportAudio?: (file: File) => void;
   onExportStandaloneHtml: () => void;
@@ -60,6 +64,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   onDeleteFolder,
   onCreateSessionInFolder,
   onDeleteSession,
+  onRestoreSession,
+  onHardDeleteSession,
+  onEmptyBin,
   onAudioUploadedInFolder,
   onImportAudio,
   onOpenShortcuts,
@@ -71,6 +78,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const [folderSearchQuery, setFolderSearchQuery] = useState('');
 
   const fileUploadInputRef = React.useRef<HTMLInputElement | null>(null);
+
+  // Split active sessions vs soft-deleted sessions
+  const activeSessions = sessions.filter((s) => !s.deletedAt);
+  const deletedSessions = sessions.filter((s) => !!s.deletedAt);
 
   // Vibrant Chalk Pastel color options for folder creation
   const folderColors = [
@@ -93,7 +104,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const handleUploadAudioChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      if (selectedFolderId) {
+      if (selectedFolderId && selectedFolderId !== 'bin') {
         onAudioUploadedInFolder(selectedFolderId, file);
       } else if (onImportAudio) {
         onImportAudio(file);
@@ -110,9 +121,138 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     downloadNativeAudio(session.audioBlob, session.title || 'recording');
   };
 
+  // RECYCLE BIN VIEW: Display soft-deleted sessions with 90-day timer, restore & hard-delete
+  if (selectedFolderId === 'bin') {
+    return (
+      <div className="flex-1 overflow-y-auto p-6 md:p-10 max-w-5xl mx-auto w-full">
+        {/* Navigation & Header */}
+        <div className="flex items-center justify-between mb-8 pb-4 border-b border-[#e8e4dc] dark:border-stone-800">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => onSelectFolder(null)}
+              className="p-2 rounded-xl bg-white dark:bg-stone-900 border border-[#e8e4dc] dark:border-stone-800 hover:bg-[#f7f5f0] dark:hover:bg-stone-800 text-stone-800 dark:text-stone-200 transition-colors cursor-pointer shadow-2xs"
+              title="Back to All Folders"
+            >
+              <ArrowLeft className="w-4 h-4" />
+            </button>
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-xl bg-rose-100 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 flex items-center justify-center shadow-2xs">
+                <Trash2 className="w-4 h-4" />
+              </div>
+              <div>
+                <h2 className="text-xl font-bold text-stone-900 dark:text-white flex items-center gap-2">
+                  <span>Recently Deleted</span>
+                  <span className="text-xs px-2 py-0.5 rounded-full bg-rose-100 dark:bg-rose-950/80 text-rose-700 dark:text-rose-300 font-mono font-bold">
+                    {deletedSessions.length}
+                  </span>
+                </h2>
+                <p className="text-xs text-stone-500 dark:text-stone-400">
+                  Recordings in the Bin are retained for 90 days before permanent deletion
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {deletedSessions.length > 0 && onEmptyBin && (
+            <button
+              onClick={onEmptyBin}
+              className="py-2 px-3.5 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/50 dark:hover:bg-rose-900/60 border border-rose-200 dark:border-rose-800/80 text-rose-700 dark:text-rose-300 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs"
+              title="Permanently remove all items in the Bin"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>Empty Bin</span>
+            </button>
+          )}
+        </div>
+
+        {/* Deleted Sessions List */}
+        {deletedSessions.length === 0 ? (
+          <div className="p-12 text-center border-2 border-dashed border-[#e4ded5] dark:border-stone-800 rounded-2xl bg-[#faf8f5] dark:bg-stone-900/40">
+            <div className="w-12 h-12 rounded-2xl bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 flex items-center justify-center mx-auto mb-3 shadow-2xs">
+              <Trash2 className="w-6 h-6" />
+            </div>
+            <h3 className="text-sm font-bold text-stone-900 dark:text-stone-100 mb-1">
+              Bin is empty
+            </h3>
+            <p className="text-xs text-stone-500 dark:text-stone-400 max-w-sm mx-auto">
+              Recordings you delete will be safely kept here for 90 days before being permanently cleared from your browser storage.
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {deletedSessions.map((session) => {
+              const formattedDate = formatDateTime(session.createdAt || session.updatedAt);
+              const durationStr = formatTime(session.duration);
+              const daysLeft = Math.max(
+                0,
+                90 -
+                  Math.floor(
+                    (Date.now() - (session.deletedAt || Date.now())) /
+                      (1000 * 60 * 60 * 24)
+                  )
+              );
+
+              return (
+                <div
+                  key={session.id}
+                  className="flex flex-col w-full p-4 mb-3 text-left transition-all border rounded-xl shadow-xs bg-white border-stone-200 dark:bg-stone-900 dark:border-stone-800"
+                >
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 min-w-0">
+                    <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                      <div className="w-8 h-8 rounded-lg bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 flex items-center justify-center shrink-0">
+                        <Trash2 className="w-4 h-4" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <h4 className="font-semibold text-stone-900 dark:text-stone-100 truncate text-sm sm:text-base">
+                          {session.title}
+                        </h4>
+                        <div className="flex items-center gap-2 mt-0.5 text-xs text-stone-500 dark:text-stone-400">
+                          <span>{formattedDate}</span>
+                          <span>·</span>
+                          <span className="font-mono">{durationStr}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Replacement Controls for Deleted Sessions: Days Remaining, Restore & Delete Permanently */}
+                    <div className="flex items-center gap-2 shrink-0 self-end sm:self-auto">
+                      <span className="px-2.5 py-1 rounded-lg bg-amber-50 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 text-xs font-mono font-bold border border-amber-200/80 dark:border-amber-800/60">
+                        {daysLeft} {daysLeft === 1 ? 'day' : 'days'} left
+                      </span>
+
+                      <button
+                        type="button"
+                        onClick={() => onRestoreSession?.(session.id)}
+                        className="py-1.5 px-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs"
+                        title="Restore recording to its original folder"
+                      >
+                        <RotateCcw className="w-3.5 h-3.5" />
+                        <span>Restore</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => onHardDeleteSession?.(session.id)}
+                        className="py-1.5 px-3 bg-rose-50 dark:bg-rose-950/60 hover:bg-rose-100 dark:hover:bg-rose-900 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs"
+                        title="Permanently erase from disk"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>Delete Permanently</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
+  }
+
   const activeFolder = folders.find((f) => f.id === selectedFolderId) || null;
   const folderSessions = selectedFolderId
-    ? sessions.filter((s) => s.folderId === selectedFolderId)
+    ? activeSessions.filter((s) => s.folderId === selectedFolderId)
     : [];
 
   const filteredFolders = folders.filter((f) =>
@@ -363,7 +503,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       {/* Grid of Folder Cards in Chalk Pastel Palette */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
         {filteredFolders.map((folder) => {
-          const folderSess = sessions.filter((s) => s.folderId === folder.id);
+          const folderSess = activeSessions.filter((s) => s.folderId === folder.id);
           const totalDuration = folderSess.reduce((acc, s) => acc + (s.duration || 0), 0);
           const lastUpdated =
             folderSess.length > 0 ? Math.max(...folderSess.map((s) => s.updatedAt)) : null;
@@ -424,6 +564,40 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </div>
           );
         })}
+
+        {/* Hard-coded "Recently Deleted" / Bin Card */}
+        <div
+          onClick={() => onSelectFolder('bin')}
+          className="group relative bg-[#faf8f5] dark:bg-stone-900/90 rounded-2xl border border-dashed border-rose-300/80 dark:border-rose-900/60 hover:border-rose-500 dark:hover:border-rose-500 p-5 shadow-2xs hover:shadow-md transition-all cursor-pointer flex flex-col justify-between"
+        >
+          <div>
+            <div className="flex items-center justify-between mb-4">
+              <div className="w-11 h-11 rounded-xl flex items-center justify-center bg-rose-100 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 shadow-2xs transition-transform group-hover:scale-105">
+                <Trash2 className="w-5 h-5" />
+              </div>
+              <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-rose-100 dark:bg-rose-950/80 text-rose-700 dark:text-rose-300 font-bold">
+                90-Day Bin
+              </span>
+            </div>
+
+            <h3 className="text-base font-bold text-stone-900 dark:text-white mb-1 group-hover:text-rose-600 dark:group-hover:text-rose-400 transition-colors">
+              Recently Deleted
+            </h3>
+            <p className="text-xs text-stone-600 dark:text-stone-400">
+              {deletedSessions.length} {deletedSessions.length === 1 ? 'recording' : 'recordings'} in Bin
+            </p>
+          </div>
+
+          <div className="pt-4 mt-4 border-t border-[#ede7dd] dark:border-stone-800/80 flex items-center justify-between text-xs text-stone-500 dark:text-stone-400">
+            <span className="text-[11px] font-mono">
+              {deletedSessions.length > 0 ? 'Retained for 90 days' : 'Empty'}
+            </span>
+            <span className="text-rose-600 dark:text-rose-400 font-semibold group-hover:translate-x-0.5 transition-transform flex items-center gap-1 text-[11px]">
+              <span>Open Bin</span>
+              <span>→</span>
+            </span>
+          </div>
+        </div>
 
         {/* Create New Folder Card */}
         {isCreatingFolder ? (

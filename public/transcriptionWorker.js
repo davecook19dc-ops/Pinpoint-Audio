@@ -91,31 +91,70 @@ self.addEventListener('message', async (event) => {
         message: 'Transcribing speech to text with Moonshine...',
       });
 
+      // Track chunk processing for progress reporting and prevent OOM
+      const chunkLengthS = 30;
+      const strideLengthS = 5;
+      const effectiveChunkS = chunkLengthS - strideLengthS;
+      const estimatedTotalChunks = Math.max(1, Math.ceil(totalDuration / effectiveChunkS));
+      let processedChunks = 0;
+
+      const chunkCallback = (chunk) => {
+        processedChunks++;
+        const elapsedSeconds = Math.round((performance.now() - startTime) / 1000);
+        const percent = Math.min(
+          99,
+          Math.max(15, Math.round((processedChunks / estimatedTotalChunks) * 80) + 15)
+        );
+        const processedSeconds = Math.min(Math.round(totalDuration), processedChunks * effectiveChunkS);
+        const avgSecondsPerChunk = elapsedSeconds / Math.max(1, processedChunks);
+        const remainingChunks = Math.max(0, estimatedTotalChunks - processedChunks);
+        const estimatedTimeRemaining = Math.round(remainingChunks * avgSecondsPerChunk);
+
+        self.postMessage({
+          type: 'inference_progress',
+          percent,
+          chunkIndex: processedChunks,
+          totalChunks: estimatedTotalChunks,
+          processedSeconds,
+          totalDuration: Math.round(totalDuration),
+          elapsedSeconds,
+          estimatedTimeRemaining,
+          message: `Transcribing chunk ${processedChunks} of ${estimatedTotalChunks}...`,
+          detail: `Processed ${processedSeconds}s of ${Math.round(totalDuration)}s audio`,
+          chunk,
+        });
+      };
+
       self.postMessage({
         type: 'inference_progress',
-        percent: 25,
-        chunkIndex: 1,
-        totalChunks: 1,
+        percent: 15,
+        chunkIndex: 0,
+        totalChunks: estimatedTotalChunks,
         processedSeconds: 0,
         totalDuration: Math.round(totalDuration),
         elapsedSeconds: 0,
         estimatedTimeRemaining: Math.max(1, Math.round(totalDuration * 0.1)),
         message: 'Transcribing speech to text with Moonshine...',
-        detail: `Running single-pass Moonshine inference on ${Math.round(totalDuration)}s audio...`,
+        detail: `Starting transcription of ${Math.round(totalDuration)}s audio (${estimatedTotalChunks} chunks)...`,
       });
 
       // Filter out Whisper-specific parameters (e.g. language: 'en', task: 'transcribe')
       const { language, task, ...cleanOptions } = options || {};
 
-      // Execute Moonshine in a single rapid pass without artificial chunking
-      const output = await transcriber(float32Array, cleanOptions);
+      // Execute Moonshine with chunking to prevent std::bad_alloc OOM on long audio
+      const output = await transcriber(float32Array, {
+        chunk_length_s: 30,
+        stride_length_s: 5,
+        chunk_callback: chunkCallback,
+        ...cleanOptions,
+      });
 
       const totalElapsed = Math.round((performance.now() - startTime) / 1000);
       self.postMessage({
         type: 'inference_progress',
         percent: 100,
-        chunkIndex: 1,
-        totalChunks: 1,
+        chunkIndex: Math.max(processedChunks, estimatedTotalChunks),
+        totalChunks: Math.max(processedChunks, estimatedTotalChunks),
         processedSeconds: Math.round(totalDuration),
         totalDuration: Math.round(totalDuration),
         elapsedSeconds: totalElapsed,

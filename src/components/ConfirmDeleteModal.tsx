@@ -6,6 +6,7 @@ import { formatTime } from '../utils/audio';
 interface ConfirmDeleteModalProps {
   isOpen: boolean;
   session: Session | null;
+  isPermanent?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
 }
@@ -13,6 +14,7 @@ interface ConfirmDeleteModalProps {
 export const ConfirmDeleteModal: React.FC<ConfirmDeleteModalProps> = ({
   isOpen,
   session,
+  isPermanent = false,
   onConfirm,
   onCancel,
 }) => {
@@ -54,10 +56,10 @@ export const ConfirmDeleteModal: React.FC<ConfirmDeleteModalProps> = ({
                 id="delete-modal-title"
                 className="text-sm font-bold text-neutral-900 dark:text-white leading-tight"
               >
-                Delete Recording
+                {isPermanent ? 'Delete Permanently' : 'Move to Bin'}
               </h3>
               <p className="text-[11px] text-neutral-500 dark:text-neutral-400">
-                Permanent IndexedDB removal
+                {isPermanent ? 'Permanent IndexedDB removal' : 'Retained for 90 days'}
               </p>
             </div>
           </div>
@@ -74,7 +76,9 @@ export const ConfirmDeleteModal: React.FC<ConfirmDeleteModalProps> = ({
         {/* Content Body */}
         <div className="p-5 space-y-4">
           <p className="text-xs text-neutral-600 dark:text-neutral-300 leading-relaxed">
-            Are you sure you want to delete this session? All recorded audio and associated timestamped notes will be permanently removed.
+            {isPermanent
+              ? 'Are you sure you want to permanently delete this session? All recorded audio and associated notes will be wiped immediately and cannot be recovered.'
+              : 'Move this session to the Bin? It will be hidden from your main library and can be restored anytime within the next 90 days before permanent deletion.'}
           </p>
 
           {/* Session Details Card */}
@@ -98,10 +102,22 @@ export const ConfirmDeleteModal: React.FC<ConfirmDeleteModalProps> = ({
           </div>
 
           {/* Warning Banner */}
-          <div className="flex items-start gap-2.5 p-3 rounded-xl bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800/50 text-xs text-amber-800 dark:text-amber-300">
-            <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-amber-600 dark:text-amber-400" />
-            <span className="leading-snug">
-              This action cannot be undone. Local IndexedDB storage for this session will be freed.
+          <div
+            className={`flex items-start gap-2.5 p-3 rounded-xl text-xs leading-snug border ${
+              isPermanent
+                ? 'bg-rose-50 dark:bg-rose-950/20 border-rose-200 dark:border-rose-800/50 text-rose-800 dark:text-rose-300'
+                : 'bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800/50 text-amber-800 dark:text-amber-300'
+            }`}
+          >
+            <AlertTriangle
+              className={`w-4 h-4 shrink-0 mt-0.5 ${
+                isPermanent ? 'text-rose-600 dark:text-rose-400' : 'text-amber-600 dark:text-amber-400'
+              }`}
+            />
+            <span>
+              {isPermanent
+                ? 'This action cannot be undone. Local IndexedDB storage for this session will be permanently cleared.'
+                : 'Deleted sessions are stored in the Bin and will be automatically purged after 90 days.'}
             </span>
           </div>
         </div>
@@ -118,10 +134,9 @@ export const ConfirmDeleteModal: React.FC<ConfirmDeleteModalProps> = ({
           <button
             type="button"
             onClick={onConfirm}
-            className="px-4 py-2 text-xs font-semibold rounded-lg bg-rose-600 hover:bg-rose-700 text-white flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer"
+            className="px-4 py-2 text-xs font-semibold rounded-lg bg-rose-600 hover:bg-rose-700 text-white transition-colors cursor-pointer shadow-xs"
           >
-            <Trash2 className="w-3.5 h-3.5" />
-            <span>Yes, Delete</span>
+            {isPermanent ? 'Delete Permanently' : 'Move to Bin'}
           </button>
         </div>
       </div>

@@ -39,6 +39,7 @@ export interface Session {
   transcript?: string;
   chunks?: TranscriptionChunk[];
   images?: SessionImage[];
+  deletedAt?: number; // timestamp in ms when moved to bin (soft-deleted)
 }
 
 export interface Folder {
