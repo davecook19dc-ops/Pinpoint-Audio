@@ -84,85 +84,46 @@ self.addEventListener('message', async (event: MessageEvent) => {
         message: 'Transcribing speech to text with Moonshine...',
       });
 
-      // Track chunk processing for progress reporting and prevent OOM
-      const chunkLengthS = 30;
-      const strideLengthS = 5;
-      const effectiveChunkS = chunkLengthS - strideLengthS;
-      const estimatedTotalChunks = Math.max(1, Math.ceil(totalDuration / effectiveChunkS));
+      const chunkDuration = 30; // 30 seconds
+      const sampleRate = 16000;
+      const stepSamples = chunkDuration * sampleRate;
+      const estimatedTotalChunks = Math.ceil(float32Array.length / stepSamples);
+
+      let results: string[] = [];
       let processedChunks = 0;
+      const { language, task, chunk_length_s, stride_length_s, chunk_callback, ...cleanOptions } = options || {};
 
-      const chunkCallback = (chunk: any) => {
+      for (let start = 0; start < float32Array.length; start += stepSamples) {
+        const end = Math.min(float32Array.length, start + stepSamples);
+        const chunkArray = float32Array.slice(start, end);
+
+        // Run model on the small 30-second slice
+        const output = await transcriber(chunkArray, cleanOptions);
+        const text = Array.isArray(output) ? output[0]?.text : (output?.text || (typeof output === 'string' ? output : ''));
+        if (text) results.push(text.trim());
+
         processedChunks++;
-        const elapsedSeconds = Math.round((performance.now() - startTime) / 1000);
-        const percent = Math.min(
-          99,
-          Math.max(15, Math.round((processedChunks / estimatedTotalChunks) * 80) + 15)
-        );
-        const processedSeconds = Math.min(Math.round(totalDuration), processedChunks * effectiveChunkS);
-        const avgSecondsPerChunk = elapsedSeconds / Math.max(1, processedChunks);
-        const remainingChunks = Math.max(0, estimatedTotalChunks - processedChunks);
-        const estimatedTimeRemaining = Math.round(remainingChunks * avgSecondsPerChunk);
+        const elapsedSeconds = (performance.now() - startTime) / 1000;
+        const timePerChunk = elapsedSeconds / processedChunks;
 
+        // Report progress to the UI
         self.postMessage({
           type: 'inference_progress',
-          percent,
+          percent: Math.round((processedChunks / estimatedTotalChunks) * 100),
           chunkIndex: processedChunks,
           totalChunks: estimatedTotalChunks,
-          processedSeconds,
+          processedSeconds: Math.round(end / sampleRate),
           totalDuration: Math.round(totalDuration),
-          elapsedSeconds,
-          estimatedTimeRemaining,
-          message: `Transcribing chunk ${processedChunks} of ${estimatedTotalChunks}...`,
-          detail: `Processed ${processedSeconds}s of ${Math.round(totalDuration)}s audio`,
-          chunk,
+          elapsedSeconds: Math.round(elapsedSeconds),
+          estimatedTimeRemaining: Math.round((estimatedTotalChunks - processedChunks) * timePerChunk),
+          message: `Processing chunk ${processedChunks} of ${estimatedTotalChunks}...`,
         });
-      };
+      }
 
-      self.postMessage({
-        type: 'inference_progress',
-        percent: 15,
-        chunkIndex: 0,
-        totalChunks: estimatedTotalChunks,
-        processedSeconds: 0,
-        totalDuration: Math.round(totalDuration),
-        elapsedSeconds: 0,
-        estimatedTimeRemaining: Math.max(1, Math.round(totalDuration * 0.1)),
-        message: 'Transcribing speech to text with Moonshine...',
-        detail: `Starting transcription of ${Math.round(totalDuration)}s audio (${estimatedTotalChunks} chunks)...`,
-      });
-
-      // Filter out Whisper-specific parameters (e.g. language: 'en', task: 'transcribe')
-      const { language, task, ...cleanOptions } = options || {};
-
-      // Execute Moonshine with chunking to prevent std::bad_alloc OOM on long audio
-      const output = await transcriber(float32Array, {
-        chunk_length_s: 30,
-        stride_length_s: 5,
-        chunk_callback: chunkCallback,
-        ...cleanOptions,
-      });
+      // Join all chunks together into the final string
+      const normalizedResult = { text: results.join(' ') };
 
       const totalElapsed = Math.round((performance.now() - startTime) / 1000);
-      self.postMessage({
-        type: 'inference_progress',
-        percent: 100,
-        chunkIndex: Math.max(processedChunks, estimatedTotalChunks),
-        totalChunks: Math.max(processedChunks, estimatedTotalChunks),
-        processedSeconds: Math.round(totalDuration),
-        totalDuration: Math.round(totalDuration),
-        elapsedSeconds: totalElapsed,
-        estimatedTimeRemaining: 0,
-        message: 'Finalizing transcript...',
-      });
-
-      let normalizedResult = output;
-      if (Array.isArray(output) && output.length > 0) {
-        normalizedResult = output[0];
-      }
-      if (typeof normalizedResult === 'string') {
-        normalizedResult = { text: normalizedResult };
-      }
-
       self.postMessage({
         type: 'complete',
         result: normalizedResult,
