@@ -28,6 +28,9 @@ class TranscriptionService {
   /**
    * Resamples and downmixes an arbitrary audio Blob to a 16,000 Hz, mono Float32Array
    * suitable for the Whisper model.
+   *
+   * Crucially initializes AudioContext with explicit { sampleRate: 16000 } to force
+   * native 16kHz resampling during decodeAudioData.
    */
   async prepareAudioBuffer(audioBlob: Blob): Promise<Float32Array> {
     const arrayBuffer = await audioBlob.arrayBuffer();
@@ -35,7 +38,14 @@ class TranscriptionService {
     const AudioCtx =
       window.AudioContext ||
       (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-    const audioCtx = new AudioCtx();
+
+    // Explicitly initialize with sampleRate: 16000 to force native browser 16kHz resampling
+    let audioCtx: AudioContext;
+    try {
+      audioCtx = new AudioCtx({ sampleRate: 16000 });
+    } catch {
+      audioCtx = new AudioCtx();
+    }
 
     let decodedBuffer: AudioBuffer;
     try {
@@ -46,10 +56,16 @@ class TranscriptionService {
       }
     }
 
+    // If native decodeAudioData delivered 16kHz, extract channel 0 directly
+    if (decodedBuffer.sampleRate === 16000) {
+      const channel0 = decodedBuffer.getChannelData(0);
+      return new Float32Array(channel0);
+    }
+
+    // Safety fallback: if the browser ignored the constructor sampleRate,
+    // resample through OfflineAudioContext explicitly configured at 16000 Hz
     const targetSampleRate = 16000;
     const targetLength = Math.max(1, Math.round(decodedBuffer.duration * targetSampleRate));
-
-    // Resample to 16kHz mono using native OfflineAudioContext
     const offlineCtx = new OfflineAudioContext(1, targetLength, targetSampleRate);
     const source = offlineCtx.createBufferSource();
     source.buffer = decodedBuffer;
@@ -57,7 +73,8 @@ class TranscriptionService {
     source.start(0);
 
     const renderedBuffer = await offlineCtx.startRendering();
-    return renderedBuffer.getChannelData(0);
+    const channel0 = renderedBuffer.getChannelData(0);
+    return new Float32Array(channel0);
   }
 
   /**
@@ -75,22 +92,41 @@ class TranscriptionService {
           import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2';
           env.allowLocalModels = false;
           env.useBrowserCache = true;
+
+          const hw = typeof navigator !== 'undefined' && navigator.hardwareConcurrency ? navigator.hardwareConcurrency : 4;
+          const numThreads = Math.min(4, Math.max(1, Math.floor(hw / 2)));
+          if (!env.backends) env.backends = {};
+          if (!env.backends.onnx) env.backends.onnx = {};
+          if (!env.backends.onnx.wasm) env.backends.onnx.wasm = {};
+          env.backends.onnx.wasm.numThreads = numThreads;
+
           let transcriber = null;
 
           self.addEventListener('message', async (e) => {
             const { type, audioData, options } = e.data;
             if (type === 'transcribe') {
               try {
+                let float32Array = audioData instanceof Float32Array ? audioData : new Float32Array(audioData.buffer || audioData);
+
                 if (!transcriber) {
                   self.postMessage({ type: 'status', status: 'init', message: 'Loading Whisper-tiny.en model...' });
-                  try {
-                    transcriber = await pipeline('automatic-speech-recognition', 'Xenova/whisper-tiny.en', {
-                      device: 'webgpu',
-                      quantized: true,
-                      progress_callback: (p) => self.postMessage({ type: 'download_progress', progressData: p }),
-                    });
-                  } catch (webGpuErr) {
-                    console.warn('WebGPU init failed, using CPU fallback:', webGpuErr);
+                  const hasWebGpu = typeof navigator !== 'undefined' && 'gpu' in navigator && !!navigator.gpu;
+                  if (hasWebGpu) {
+                    try {
+                      const webGpuPromise = pipeline('automatic-speech-recognition', 'Xenova/whisper-tiny.en', {
+                        device: 'webgpu',
+                        quantized: true,
+                        progress_callback: (p) => self.postMessage({ type: 'download_progress', progressData: p }),
+                      });
+                      const timeoutPromise = new Promise((_, rej) => setTimeout(() => rej(new Error('WebGPU timeout')), 12000));
+                      transcriber = await Promise.race([webGpuPromise, timeoutPromise]);
+                    } catch (webGpuErr) {
+                      console.warn('WebGPU init failed, using CPU fallback:', webGpuErr);
+                      transcriber = null;
+                    }
+                  }
+                  if (!transcriber) {
+                    if (env.backends?.onnx?.wasm) env.backends.onnx.wasm.numThreads = numThreads;
                     transcriber = await pipeline('automatic-speech-recognition', 'Xenova/whisper-tiny.en', {
                       quantized: true,
                       progress_callback: (p) => self.postMessage({ type: 'download_progress', progressData: p }),
@@ -139,15 +175,33 @@ class TranscriptionService {
                   });
                 };
 
-                const res = await transcriber(audioData, {
-                  chunk_length_s: 30,
-                  stride_length_s: 5,
-                  language: 'en',
-                  task: 'transcribe',
-                  return_timestamps: true,
-                  chunk_callback,
-                  ...options,
-                });
+                let res;
+                try {
+                  res = await transcriber(float32Array, {
+                    chunk_length_s: 30,
+                    stride_length_s: 5,
+                    language: 'en',
+                    task: 'transcribe',
+                    return_timestamps: true,
+                    chunk_callback,
+                    ...options,
+                  });
+                } catch (infErr) {
+                  console.warn('Inference error in fallback worker, retrying WASM (CPU):', infErr);
+                  if (env.backends?.onnx?.wasm) env.backends.onnx.wasm.numThreads = numThreads;
+                  transcriber = await pipeline('automatic-speech-recognition', 'Xenova/whisper-tiny.en', {
+                    quantized: true,
+                  });
+                  res = await transcriber(float32Array, {
+                    chunk_length_s: 30,
+                    stride_length_s: 5,
+                    language: 'en',
+                    task: 'transcribe',
+                    return_timestamps: true,
+                    chunk_callback,
+                    ...options,
+                  });
+                }
                 self.postMessage({ type: 'complete', result: res });
               } catch (err) {
                 self.postMessage({ type: 'error', error: err.message || String(err) });

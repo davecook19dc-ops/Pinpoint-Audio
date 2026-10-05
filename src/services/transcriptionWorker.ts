@@ -1,5 +1,6 @@
 // src/services/transcriptionWorker.ts - Web Worker for local Whisper speech-to-text inference
-// Uses Xenova/whisper-tiny.en with INT8 quantization, 30-second chunking, and 5-second overlapping strides
+// Uses Xenova/whisper-tiny.en with INT8 quantization, 30-second chunking, 5-second overlapping strides,
+// and clean WebGPU to WASM (CPU with clamped numThreads) fallback to prevent worker freeze.
 
 // @ts-ignore
 import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2';
@@ -8,6 +9,18 @@ import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers
 env.allowLocalModels = false;
 env.useBrowserCache = true;
 
+// Configure ONNX WASM numThreads to prevent CPU throttling / freezing
+if (!env.backends) env.backends = {};
+if (!env.backends.onnx) env.backends.onnx = {};
+if (!env.backends.onnx.wasm) env.backends.onnx.wasm = {};
+
+const defaultConcurrency =
+  typeof navigator !== 'undefined' && navigator.hardwareConcurrency
+    ? navigator.hardwareConcurrency
+    : 4;
+const configuredThreads = Math.min(4, Math.max(1, Math.floor(defaultConcurrency / 2)));
+env.backends.onnx.wasm.numThreads = configuredThreads;
+
 // Singleton pattern to avoid re-allocating the Whisper pipeline
 class WhisperPipelineSingleton {
   static model = 'Xenova/whisper-tiny.en';
@@ -15,19 +28,54 @@ class WhisperPipelineSingleton {
 
   static async getInstance(progress_callback: any = null) {
     if (this.instance === null) {
-      try {
-        // Try WebGPU acceleration first for fastest execution
+      const concurrency =
+        typeof navigator !== 'undefined' && navigator.hardwareConcurrency
+          ? navigator.hardwareConcurrency
+          : 4;
+      const numThreads = Math.min(4, Math.max(1, Math.floor(concurrency / 2)));
+
+      if (env.backends?.onnx?.wasm) {
+        env.backends.onnx.wasm.numThreads = numThreads;
+      }
+
+      // Check if WebGPU is available in current browser environment
+      const hasWebGpu = typeof navigator !== 'undefined' && 'gpu' in navigator && !!navigator.gpu;
+
+      if (hasWebGpu) {
+        try {
+          // Attempt WebGPU with a 12s timeout guard to prevent shader compilation hang
+          const webGpuPipelinePromise = pipeline('automatic-speech-recognition', this.model, {
+            device: 'webgpu',
+            quantized: true,
+            progress_callback,
+          });
+
+          const timeoutPromise = new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('WebGPU pipeline initialization timed out')), 12000)
+          );
+
+          this.instance = await Promise.race([webGpuPipelinePromise, timeoutPromise]);
+          console.log('[Whisper Worker] Initialized with WebGPU acceleration.');
+        } catch (err) {
+          console.warn(
+            '[Whisper Worker] WebGPU initialization failed or unstable, cleanly falling back to WASM (CPU):',
+            err
+          );
+          this.instance = null;
+        }
+      }
+
+      // Clean fallback to WASM (CPU)
+      if (this.instance === null) {
+        if (env.backends?.onnx?.wasm) {
+          env.backends.onnx.wasm.numThreads = numThreads;
+        }
+        console.log(`[Whisper Worker] Initializing WASM (CPU) pipeline with ${numThreads} threads...`);
         this.instance = await pipeline('automatic-speech-recognition', this.model, {
-          device: 'webgpu',
           quantized: true,
           progress_callback,
         });
-      } catch (err) {
-        console.warn('WebGPU acceleration not supported or failed, falling back to CPU quantized INT8:', err);
-        this.instance = await pipeline('automatic-speech-recognition', this.model, {
-          quantized: true,
-          progress_callback,
-        });
+        console.log('[Whisper Worker] WASM (CPU) pipeline initialized successfully.');
       }
     }
     return this.instance;
@@ -45,6 +93,18 @@ self.addEventListener('message', async (event: MessageEvent) => {
         message: 'Initializing local quantized Whisper pipeline (Xenova/whisper-tiny.en)...',
       });
 
+      // Ensure audioData is a valid 16kHz Float32Array
+      let float32Array: Float32Array;
+      if (audioData instanceof Float32Array) {
+        float32Array = audioData;
+      } else if (audioData && audioData.buffer) {
+        float32Array = new Float32Array(audioData.buffer);
+      } else if (Array.isArray(audioData)) {
+        float32Array = new Float32Array(audioData);
+      } else {
+        throw new Error('Invalid audio data received by worker. Expected Float32Array.');
+      }
+
       // Get or load pipeline with download progress callbacks
       const transcriber = await WhisperPipelineSingleton.getInstance((progressData: any) => {
         self.postMessage({
@@ -53,8 +113,8 @@ self.addEventListener('message', async (event: MessageEvent) => {
         });
       });
 
-      // Calculate total audio duration in seconds
-      const totalDuration = Math.max(0.1, audioData.length / 16000);
+      // Calculate total audio duration in seconds (16,000 samples per second)
+      const totalDuration = Math.max(0.1, float32Array.length / 16000);
       const chunkLengthS = 30; // 30-second blocks
       const strideLengthS = 5;  // 5-second overlap
       const effectiveStep = chunkLengthS - strideLengthS; // 25s progress per chunk
@@ -118,15 +178,45 @@ self.addEventListener('message', async (event: MessageEvent) => {
       });
 
       // Execute local transcription with chunking, overlapping strides, and quantized pipeline
-      const output = await transcriber(audioData, {
-        chunk_length_s: 30, // Forces the model to process in 30-second blocks
-        stride_length_s: 5,  // Overlaps chunks by 5 seconds to prevent cutting off words
-        language: 'en',
-        task: 'transcribe',
-        return_timestamps: true,
-        chunk_callback: chunkCallback,
-        ...options,
-      });
+      let output: any;
+      try {
+        output = await transcriber(float32Array, {
+          chunk_length_s: 30, // Forces the model to process in 30-second blocks
+          stride_length_s: 5,  // Overlaps chunks by 5 seconds to prevent cutting off words
+          language: 'en',
+          task: 'transcribe',
+          return_timestamps: true,
+          chunk_callback: chunkCallback,
+          ...options,
+        });
+      } catch (inferenceErr) {
+        console.warn(
+          '[Whisper Worker] Inference error occurred. Retrying with WASM (CPU) fallback...',
+          inferenceErr
+        );
+        WhisperPipelineSingleton.instance = null;
+        if (env.backends?.onnx?.wasm) {
+          const hw =
+            typeof navigator !== 'undefined' && navigator.hardwareConcurrency
+              ? navigator.hardwareConcurrency
+              : 4;
+          env.backends.onnx.wasm.numThreads = Math.min(4, Math.max(1, Math.floor(hw / 2)));
+        }
+        const wasmTranscriber = await pipeline('automatic-speech-recognition', WhisperPipelineSingleton.model, {
+          quantized: true,
+        });
+        WhisperPipelineSingleton.instance = wasmTranscriber;
+
+        output = await wasmTranscriber(float32Array, {
+          chunk_length_s: 30,
+          stride_length_s: 5,
+          language: 'en',
+          task: 'transcribe',
+          return_timestamps: true,
+          chunk_callback: chunkCallback,
+          ...options,
+        });
+      }
 
       const totalElapsed = Math.round((performance.now() - startTime) / 1000);
       self.postMessage({
