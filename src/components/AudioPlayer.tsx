@@ -911,6 +911,41 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
               />
             </div>
 
+            {/* Inline Transcription Progress Callout in Post-Recording view */}
+            {isTranscribing && (
+              <div className="p-3 rounded-xl bg-indigo-50/80 dark:bg-indigo-950/40 border border-indigo-200/80 dark:border-indigo-800/60 space-y-2 animate-in fade-in duration-200">
+                <div className="flex items-center justify-between text-xs">
+                  <div className="flex items-center gap-1.5 font-semibold text-indigo-950 dark:text-indigo-200 truncate pr-2">
+                    <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-600 dark:text-indigo-400 shrink-0" />
+                    <span className="truncate">
+                      {transcriptionStatus || 'Processing audio chunks...'}
+                    </span>
+                  </div>
+                  <span className="font-mono font-bold text-indigo-700 dark:text-indigo-300 text-xs shrink-0">
+                    {Math.round(transcriptionProgress)}%
+                  </span>
+                </div>
+
+                <div className="w-full h-2 bg-[#e0d9cf] dark:bg-stone-700 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-gradient-to-r from-indigo-500 to-indigo-600 rounded-full transition-all duration-300"
+                    style={{ width: `${Math.max(2, Math.min(100, transcriptionProgress))}%` }}
+                  />
+                </div>
+
+                <div className="flex items-center justify-between text-[11px] font-mono text-stone-600 dark:text-stone-300">
+                  <span className="truncate">
+                    {transcriptionDetail || 'Processing with 30s chunks & 5s stride...'}
+                  </span>
+                  {typeof transcriptionElapsed === 'number' && (
+                    <span className="shrink-0 ml-2">
+                      Elapsed: {formatTime(transcriptionElapsed)} {typeof transcriptionEta === 'number' ? `• ETA: ~${formatTime(transcriptionEta)}` : ''}
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
+
             {/* Post-Recording Backup Reminder Callout */}
             <div className="p-3 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200/80 dark:border-amber-800/60 text-xs text-amber-800 dark:text-amber-200 flex items-start gap-2 shadow-2xs leading-relaxed">
               <span className="shrink-0 text-sm select-none">💡</span>
@@ -1301,10 +1336,20 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
                 />
               </div>
 
+              {/* Detail label e.g. "Chunk 2 of 5 • 60s of 145s audio" */}
+              {transcriptionDetail && (
+                <div className="text-[11px] text-stone-600 dark:text-stone-300 font-mono truncate">
+                  {transcriptionDetail}
+                </div>
+              )}
+
               {/* Live Elapsed & ETA display formatted in mm:ss */}
               <div className="flex items-center justify-between text-[11px] font-mono text-stone-700 dark:text-stone-300 tabular-nums">
                 <span>
                   Elapsed: {formatTime(transcriptionElapsed || 0)} | ETA: ~{formatTime(transcriptionEta || 0)} remaining
+                </span>
+                <span className="text-[10px] text-indigo-600 dark:text-indigo-400 font-sans font-medium">
+                  30s Strided Chunking
                 </span>
               </div>
             </div>

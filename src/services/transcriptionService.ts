@@ -15,6 +15,8 @@ export interface TranscriptionProgress {
   percent?: number;
   message: string;
   detail?: string;
+  chunkIndex?: number;
+  totalChunks?: number;
   elapsedTime?: number;
   estimatedTimeRemaining?: number;
 }
@@ -97,34 +99,51 @@ class TranscriptionService {
                 }
                 self.postMessage({ type: 'status', status: 'transcribing', message: 'Transcribing speech to text...' });
 
-                const totalDuration = audioData.length / 16000;
+                const totalDuration = Math.max(0.1, audioData.length / 16000);
+                const chunkLengthS = 30;
+                const strideLengthS = 5;
+                const effectiveStep = chunkLengthS - strideLengthS;
+                const estimatedTotalChunks = Math.max(1, Math.ceil(totalDuration / effectiveStep));
                 const startTime = performance.now();
                 let processedChunks = 0;
 
                 const chunk_callback = (chunk) => {
                   processedChunks++;
-                  let processedSeconds = processedChunks * 30;
+                  const currentChunk = processedChunks;
+                  const totalChunks = Math.max(processedChunks, estimatedTotalChunks);
+
+                  let processedSeconds = 0;
                   if (chunk && chunk.timestamp && Array.isArray(chunk.timestamp) && typeof chunk.timestamp[1] === 'number') {
-                    processedSeconds = Math.max(processedSeconds, chunk.timestamp[1]);
+                    processedSeconds = Math.min(totalDuration, chunk.timestamp[1]);
+                  } else {
+                    processedSeconds = Math.min(totalDuration, processedChunks * effectiveStep);
                   }
-                  processedSeconds = Math.min(totalDuration, processedSeconds);
 
                   const elapsedTime = (performance.now() - startTime) / 1000;
-                  const remainingAudio = Math.max(0, totalDuration - processedSeconds);
-                  const estimatedTimeRemaining = processedSeconds > 0 ? (elapsedTime / processedSeconds) * remainingAudio : 0;
-                  const percentage = Math.min(99, Math.max(1, Math.round((processedSeconds / Math.max(1, totalDuration)) * 100)));
+                  const percent = Math.min(99, Math.max(1, Math.round((currentChunk / totalChunks) * 100)));
+                  const timePerChunk = elapsedTime / currentChunk;
+                  const remainingChunks = Math.max(0, totalChunks - currentChunk);
+                  const estimatedTimeRemaining = Math.max(0, Math.round(remainingChunks * timePerChunk));
 
                   self.postMessage({
                     type: 'inference_progress',
-                    percentage,
-                    elapsedTime: Math.round(elapsedTime),
-                    estimatedTimeRemaining: Math.round(estimatedTimeRemaining),
+                    percent,
+                    chunkIndex: currentChunk,
+                    totalChunks,
+                    processedSeconds: Math.round(processedSeconds),
+                    totalDuration: Math.round(totalDuration),
+                    elapsedSeconds: Math.round(elapsedTime),
+                    estimatedTimeRemaining,
+                    message: 'Processing chunk ' + currentChunk + ' of ' + totalChunks + '...',
+                    detail: 'Chunk ' + currentChunk + ' of ' + totalChunks + ' • ' + Math.round(processedSeconds) + 's of ' + Math.round(totalDuration) + 's',
                   });
                 };
 
                 const res = await transcriber(audioData, {
                   chunk_length_s: 30,
                   stride_length_s: 5,
+                  language: 'en',
+                  task: 'transcribe',
                   return_timestamps: true,
                   chunk_callback,
                   ...options,
@@ -219,12 +238,20 @@ class TranscriptionService {
                 : undefined,
             });
           } else if (data.type === 'inference_progress') {
+            const percent = typeof data.percent === 'number' ? data.percent : (data.percentage ?? 0);
+            const currentChunk = data.chunkIndex ?? 1;
+            const totalChunks = data.totalChunks ?? 1;
+            const chunkMessage = data.message || `Processing chunk ${currentChunk} of ${totalChunks}...`;
+            const chunkDetail = data.detail || (data.totalDuration ? `Chunk ${currentChunk}/${totalChunks} • ${data.processedSeconds || 0}s of ${data.totalDuration}s audio` : undefined);
+
             onProgress({
               stage: 'transcribing',
-              percent: data.percentage,
-              message: 'Transcribing speech with local Whisper...',
-              detail: 'Processing chunks locally in background Web Worker',
-              elapsedTime: data.elapsedTime,
+              percent,
+              message: chunkMessage,
+              detail: chunkDetail,
+              chunkIndex: currentChunk,
+              totalChunks,
+              elapsedTime: data.elapsedSeconds ?? data.elapsedTime,
               estimatedTimeRemaining: data.estimatedTimeRemaining,
             });
           } else if (data.type === 'status') {

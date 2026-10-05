@@ -1,6 +1,7 @@
-// transcriptionWorker.js - Runs @xenova/transformers speech-to-text in a dedicated background Web Worker
-// Optimized for long-form lecture audio via 30s chunking, 5s overlapping stride, and quantized INT8 Whisper-tiny.en
+// src/services/transcriptionWorker.ts - Web Worker for local Whisper speech-to-text inference
+// Uses Xenova/whisper-tiny.en with INT8 quantization, 30-second chunking, and 5-second overlapping strides
 
+// @ts-ignore
 import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2';
 
 // Configure transformers environment for browser Web Worker
@@ -10,9 +11,9 @@ env.useBrowserCache = true;
 // Singleton pattern to avoid re-allocating the Whisper pipeline
 class WhisperPipelineSingleton {
   static model = 'Xenova/whisper-tiny.en';
-  static instance = null;
+  static instance: any = null;
 
-  static async getInstance(progress_callback = null) {
+  static async getInstance(progress_callback: any = null) {
     if (this.instance === null) {
       try {
         // Try WebGPU acceleration first for fastest execution
@@ -33,7 +34,7 @@ class WhisperPipelineSingleton {
   }
 }
 
-self.addEventListener('message', async (event) => {
+self.addEventListener('message', async (event: MessageEvent) => {
   const { type, audioData, options } = event.data;
 
   if (type === 'transcribe') {
@@ -45,7 +46,7 @@ self.addEventListener('message', async (event) => {
       });
 
       // Get or load pipeline with download progress callbacks
-      const transcriber = await WhisperPipelineSingleton.getInstance((progressData) => {
+      const transcriber = await WhisperPipelineSingleton.getInstance((progressData: any) => {
         self.postMessage({
           type: 'download_progress',
           progressData,
@@ -62,7 +63,7 @@ self.addEventListener('message', async (event) => {
       const startTime = performance.now();
       let processedChunks = 0;
 
-      const chunkCallback = (chunk) => {
+      const chunkCallback = (chunk: any) => {
         processedChunks++;
         const currentChunk = processedChunks;
         const totalChunks = Math.max(processedChunks, estimatedTotalChunks);
