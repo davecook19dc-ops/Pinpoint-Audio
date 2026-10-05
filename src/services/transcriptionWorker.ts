@@ -55,7 +55,9 @@ class WhisperPipelineSingleton {
           );
 
           this.instance = await Promise.race([webGpuPipelinePromise, timeoutPromise]);
+          const activeDevice = this.instance?.device || 'webgpu';
           console.log('[Whisper Worker] Initialized with WebGPU acceleration.');
+          console.log('Model loaded on:', activeDevice);
         } catch (err) {
           console.warn(
             '[Whisper Worker] WebGPU initialization failed or unstable, cleanly falling back to WASM (CPU):',
@@ -75,7 +77,9 @@ class WhisperPipelineSingleton {
           quantized: true,
           progress_callback,
         });
+        const activeDevice = this.instance?.device || 'wasm';
         console.log('[Whisper Worker] WASM (CPU) pipeline initialized successfully.');
+        console.log('Model loaded on:', activeDevice);
       }
     }
     return this.instance;
@@ -112,6 +116,8 @@ self.addEventListener('message', async (event: MessageEvent) => {
           progressData,
         });
       });
+
+      console.log('Model loaded on:', transcriber.device);
 
       // Calculate total audio duration in seconds (16,000 samples per second)
       const totalDuration = Math.max(0.1, float32Array.length / 16000);

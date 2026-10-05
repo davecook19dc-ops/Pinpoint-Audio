@@ -34,6 +34,7 @@ import { Note, Session } from '../types';
 import { formatTime, downloadAudioAsMp3 } from '../utils/audio';
 import { modifierKey } from '../utils/platform';
 import { exportSessionToMarkdown, hasSessionExportableContent } from '../services/exportService';
+import { checkWebGPUSupport } from '../utils/webgpu';
 
 interface AudioPlayerProps {
   currentSession: Session | null;
@@ -139,6 +140,21 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
   };
 
   const hasExportableContent = hasSessionExportableContent(currentSession, notes);
+
+  // WebGPU support state for diagnostics and UI warning banner
+  const [hasWebGpu, setHasWebGpu] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+    checkWebGPUSupport().then((supported) => {
+      if (mounted) {
+        setHasWebGpu(supported);
+      }
+    });
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   // Recording state
   const [isRecording, setIsRecording] = useState(false);
@@ -812,6 +828,16 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
               </button>
             </div>
 
+            {/* WebGPU Support Warning Alert in Post-Recording Toolset */}
+            {hasWebGpu === false && (
+              <div className="p-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-700/80 text-amber-800 dark:text-amber-200 text-xs flex items-start gap-2 shadow-2xs leading-relaxed">
+                <span className="shrink-0 select-none">⚠️</span>
+                <span>
+                  WebGPU is not supported or disabled on this device. Transcription is running on CPU (WASM) and will be significantly slower.
+                </span>
+              </div>
+            )}
+
             {/* Post-recording Toolset Quick Bar */}
             <div className="flex flex-wrap items-center gap-2 pt-1.5 border-t border-emerald-500/10">
               {/* Download MP3 Action */}
@@ -1266,6 +1292,16 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
 
         {/* Speech-to-Text Transcription */}
         <div className="pt-4 border-t border-[#e8e4dc] dark:border-stone-800">
+          {/* WebGPU Support Warning Banner */}
+          {hasWebGpu === false && (
+            <div className="mb-3 p-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-700/80 text-amber-800 dark:text-amber-200 text-xs flex items-start gap-2 shadow-2xs leading-relaxed">
+              <span className="shrink-0 select-none">⚠️</span>
+              <span>
+                WebGPU is not supported or disabled on this device. Transcription is running on CPU (WASM) and will be significantly slower.
+              </span>
+            </div>
+          )}
+
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div className="flex items-start sm:items-center gap-2.5 min-w-0 mr-1">
               <div className="p-1.5 rounded-lg bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-400 shrink-0 mt-0.5 sm:mt-0">

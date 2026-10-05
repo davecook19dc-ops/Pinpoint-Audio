@@ -132,6 +132,7 @@ class TranscriptionService {
                       progress_callback: (p) => self.postMessage({ type: 'download_progress', progressData: p }),
                     });
                   }
+                  console.log('Model loaded on:', transcriber?.device || 'wasm');
                 }
                 self.postMessage({ type: 'status', status: 'transcribing', message: 'Transcribing speech to text...' });
 
