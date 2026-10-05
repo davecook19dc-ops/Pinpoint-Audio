@@ -13,7 +13,7 @@ import {
   ArrowRightLeft,
 } from 'lucide-react';
 import { Folder, Session } from '../types';
-import { formatTime, downloadAudioAsMp3 } from '../utils/audio';
+import { formatTime, downloadNativeAudio } from '../utils/audio';
 
 interface DashboardViewProps {
   folders: Folder[];
@@ -27,6 +27,7 @@ interface DashboardViewProps {
   onCreateSessionInFolder: (folderId: string) => void;
   onDeleteSession: (sessionId: string) => void;
   onAudioUploadedInFolder: (folderId: string, file: File) => void;
+  onImportAudio?: (file: File) => void;
   onExportStandaloneHtml: () => void;
   onOpenShortcuts: () => void;
   onOpenSync?: () => void;
@@ -60,6 +61,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   onCreateSessionInFolder,
   onDeleteSession,
   onAudioUploadedInFolder,
+  onImportAudio,
   onOpenShortcuts,
   onOpenSync,
 }) => {
@@ -67,7 +69,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const [newFolderName, setNewFolderName] = useState('');
   const [newFolderColor, setNewFolderColor] = useState('#10B981');
   const [folderSearchQuery, setFolderSearchQuery] = useState('');
-  const [downloadingMp3SessionId, setDownloadingMp3SessionId] = useState<string | null>(null);
 
   const fileUploadInputRef = React.useRef<HTMLInputElement | null>(null);
 
@@ -91,20 +92,22 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
   const handleUploadAudioChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file && selectedFolderId) {
-      onAudioUploadedInFolder(selectedFolderId, file);
+    if (file) {
+      if (selectedFolderId) {
+        onAudioUploadedInFolder(selectedFolderId, file);
+      } else if (onImportAudio) {
+        onImportAudio(file);
+      } else {
+        const defaultFolderId = folders[0]?.id || 'lectures-default';
+        onAudioUploadedInFolder(defaultFolderId, file);
+      }
       e.target.value = '';
     }
   };
 
-  const handleDownloadMp3 = async (session: Session) => {
+  const handleDownloadAudio = (session: Session) => {
     if (!session.audioBlob) return;
-    try {
-      setDownloadingMp3SessionId(session.id);
-      await downloadAudioAsMp3(session.audioBlob, session.title || 'recording');
-    } finally {
-      setDownloadingMp3SessionId(null);
-    }
+    downloadNativeAudio(session.audioBlob, session.title || 'recording');
   };
 
   const activeFolder = folders.find((f) => f.id === selectedFolderId) || null;
@@ -159,14 +162,15 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <button
               onClick={() => fileUploadInputRef.current?.click()}
               className="py-2 px-3.5 bg-white dark:bg-stone-900 border border-[#e8e4dc] dark:border-stone-700 hover:bg-[#f7f5f0] dark:hover:bg-stone-800 text-stone-800 dark:text-stone-200 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs"
+              title="Import audio file"
             >
-              <Upload className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-              <span>Upload Audio</span>
+              <Upload className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+              <span>Import Audio</span>
             </button>
             <input
               ref={fileUploadInputRef}
               type="file"
-              accept="audio/*"
+              accept="audio/webm, audio/mp4, audio/mp3, audio/wav, audio/*"
               className="hidden"
               onChange={handleUploadAudioChange}
             />
@@ -244,24 +248,18 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                         Open Editor
                       </button>
 
-                      {/* Download MP3 Button */}
+                      {/* Download Audio Button */}
                       <button
-                        onClick={() => handleDownloadMp3(session)}
-                        disabled={!session.audioBlob || downloadingMp3SessionId === session.id}
+                        onClick={() => handleDownloadAudio(session)}
+                        disabled={!session.audioBlob}
                         title={
-                          downloadingMp3SessionId === session.id
-                            ? 'Converting to MP3 in background worker...'
-                            : session.audioBlob
-                            ? 'Download recording as MP3'
+                          session.audioBlob
+                            ? 'Download recording audio file'
                             : 'No audio available'
                         }
-                        className="p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-wait"
+                        className="p-1.5 text-stone-500 hover:text-indigo-600 hover:bg-stone-100 dark:hover:bg-stone-800 rounded-lg transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                       >
-                        {downloadingMp3SessionId === session.id ? (
-                          <Loader2 className="w-4 h-4 text-indigo-600 animate-spin" />
-                        ) : (
-                          <Download className="w-4 h-4" />
-                        )}
+                        <Download className="w-4 h-4" />
                       </button>
 
                       {/* Delete Session Button */}
@@ -311,6 +309,23 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
         {/* Global Dashboard Actions */}
         <div className="flex items-center gap-2 flex-wrap">
+          <input
+            ref={fileUploadInputRef}
+            type="file"
+            accept="audio/webm, audio/mp4, audio/mp3, audio/wav, audio/*"
+            className="hidden"
+            onChange={handleUploadAudioChange}
+          />
+
+          <button
+            onClick={() => fileUploadInputRef.current?.click()}
+            title="Import audio file into library"
+            className="py-2 px-3.5 bg-white dark:bg-stone-900 border border-[#e8e4dc] dark:border-stone-700 hover:bg-[#f7f5f0] dark:hover:bg-stone-800 text-stone-800 dark:text-stone-200 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs"
+          >
+            <Upload className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+            <span>Import Audio</span>
+          </button>
+
           <button
             onClick={onOpenShortcuts}
             className="py-2 px-3 bg-white dark:bg-stone-900 border border-[#e8e4dc] dark:border-stone-700 hover:bg-[#f7f5f0] dark:hover:bg-stone-800 text-stone-700 dark:text-stone-200 rounded-xl text-xs font-semibold flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer"

@@ -9,6 +9,7 @@ import {
   Layers,
   Keyboard,
   ArrowRightLeft,
+  Upload,
 } from 'lucide-react';
 import { AppSettings, Folder, Session, ThemeMode } from '../types';
 import { PWAInstallButton } from './PWAInstallButton';
@@ -30,6 +31,7 @@ interface SidebarProps {
   onExportStandaloneHtml: () => void;
   onOpenShortcuts: () => void;
   onOpenSync?: () => void;
+  onImportAudio?: (file: File) => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -48,10 +50,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onExportStandaloneHtml,
   onOpenShortcuts,
   onOpenSync,
+  onImportAudio,
 }) => {
   const [isAddingFolder, setIsAddingFolder] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
   const [newFolderColor, setNewFolderColor] = useState('#10B981');
+  const audioImportInputRef = React.useRef<HTMLInputElement | null>(null);
 
   const handleAddFolderSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -84,14 +88,39 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
         </div>
 
-        {/* New Session Action */}
-        <button
-          onClick={onCreateSession}
-          title="Create New Session"
-          className="p-1.5 rounded-xl bg-white dark:bg-stone-800 border border-[#e8e4dc] dark:border-stone-700 text-stone-800 dark:text-stone-200 hover:bg-[#f0ece4] dark:hover:bg-stone-700 transition-colors cursor-pointer shadow-2xs"
-        >
-          <Plus className="w-4 h-4" />
-        </button>
+        <div className="flex items-center gap-1.5">
+          {/* Import Audio Action */}
+          <input
+            ref={audioImportInputRef}
+            type="file"
+            accept="audio/webm, audio/mp4, audio/mp3, audio/wav, audio/*"
+            className="hidden"
+            onChange={(e) => {
+              if (e.target.files && e.target.files[0]) {
+                if (onImportAudio) {
+                  onImportAudio(e.target.files[0]);
+                }
+                e.target.value = '';
+              }
+            }}
+          />
+          <button
+            onClick={() => audioImportInputRef.current?.click()}
+            title="Import Audio File"
+            className="p-1.5 rounded-xl bg-white dark:bg-stone-800 border border-[#e8e4dc] dark:border-stone-700 text-stone-800 dark:text-stone-200 hover:bg-[#f0ece4] dark:hover:bg-stone-700 transition-colors cursor-pointer shadow-2xs"
+          >
+            <Upload className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+          </button>
+
+          {/* New Session Action */}
+          <button
+            onClick={onCreateSession}
+            title="Create New Session"
+            className="p-1.5 rounded-xl bg-white dark:bg-stone-800 border border-[#e8e4dc] dark:border-stone-700 text-stone-800 dark:text-stone-200 hover:bg-[#f0ece4] dark:hover:bg-stone-700 transition-colors cursor-pointer shadow-2xs"
+          >
+            <Plus className="w-4 h-4" />
+          </button>
+        </div>
       </div>
 
       {/* Main Navigation (Folders & Sessions) */}

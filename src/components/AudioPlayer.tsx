@@ -31,10 +31,11 @@ import {
   FileDown,
 } from 'lucide-react';
 import { Note, Session } from '../types';
-import { formatTime, downloadAudioAsMp3 } from '../utils/audio';
+import { formatTime, downloadNativeAudio } from '../utils/audio';
 import { modifierKey } from '../utils/platform';
 import { exportSessionToMarkdown, hasSessionExportableContent } from '../services/exportService';
 import { checkWebGPUSupport } from '../utils/webgpu';
+import { speechService } from '../services/speechService';
 
 interface AudioPlayerProps {
   currentSession: Session | null;
@@ -109,7 +110,6 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
   // Session Title inline editing state
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [titleInput, setTitleInput] = useState(currentSession?.title || '');
-  const [isConvertingMp3, setIsConvertingMp3] = useState(false);
   const titleInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
@@ -166,6 +166,12 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
   const [recordingNotice, setRecordingNotice] = useState<string | null>(null);
   const [showMobileMeetingNotice, setShowMobileMeetingNotice] = useState(false);
 
+  // Live Web Speech transcription state (Opt-in Hybrid Mode)
+  const [useLiveTranscription, setUseLiveTranscription] = useState<boolean>(false);
+  const [liveTranscript, setLiveTranscript] = useState<string>('');
+  const [liveInterimText, setLiveInterimText] = useState<string>('');
+  const liveTranscriptRef = useRef<string>('');
+
   // References for recording
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
@@ -187,6 +193,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
   // Clean up recording on unmount
   useEffect(() => {
     return () => {
+      speechService.stop();
       if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
       if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
       activeStreamsRef.current.forEach((str) => {
@@ -397,6 +404,9 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
       };
 
       mediaRecorder.onstop = () => {
+        speechService.stop();
+        setLiveInterimText('');
+
         // Stop all active streams
         activeStreamsRef.current.forEach((str) => {
           str.getTracks().forEach((track) => track.stop());
@@ -444,6 +454,38 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
       setIsRecordingPaused(false);
       setRecordingSeconds(0);
 
+      // Start live speech recognition if user opted in
+      if (useLiveTranscription) {
+        liveTranscriptRef.current = '';
+        setLiveTranscript('');
+        setLiveInterimText('');
+        speechService.start(
+          {
+            onInterimResult: (interim) => {
+              setLiveInterimText(interim);
+            },
+            onFinalResult: (finalText, timestampSec) => {
+              const timeStr = formatTime(timestampSec);
+              const line = `[${timeStr}] ${finalText}`;
+              const updated = liveTranscriptRef.current
+                ? `${liveTranscriptRef.current}\n\n${line}`
+                : line;
+              liveTranscriptRef.current = updated;
+              setLiveTranscript(updated);
+              setLiveInterimText('');
+              const sid = activeRecordingSessionIdRef.current || currentSession?.id;
+              if (sid && onSaveTranscript) {
+                onSaveTranscript(updated);
+              }
+            },
+            onError: (err) => {
+              console.warn('Live speech recognition warning:', err);
+            },
+          },
+          () => recordingSecondsRef.current || 0
+        );
+      }
+
       // Start elapsed timer and keep current playback time in sync for live note timestamps
       if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
       recordingTimerRef.current = window.setInterval(() => {
@@ -465,6 +507,9 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
 
   // Pause active recording session
   const pauseRecording = () => {
+    if (useLiveTranscription) {
+      speechService.stop();
+    }
     if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
       try {
         mediaRecorderRef.current.pause();
@@ -492,6 +537,28 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
         console.warn('Error resuming media recorder:', err);
       }
     }
+    if (useLiveTranscription) {
+      speechService.start(
+        {
+          onInterimResult: (interim) => setLiveInterimText(interim),
+          onFinalResult: (finalText, timestampSec) => {
+            const timeStr = formatTime(timestampSec);
+            const line = `[${timeStr}] ${finalText}`;
+            const updated = liveTranscriptRef.current
+              ? `${liveTranscriptRef.current}\n\n${line}`
+              : line;
+            liveTranscriptRef.current = updated;
+            setLiveTranscript(updated);
+            setLiveInterimText('');
+            const sid = activeRecordingSessionIdRef.current || currentSession?.id;
+            if (sid && onSaveTranscript) {
+              onSaveTranscript(updated);
+            }
+          },
+        },
+        () => recordingSecondsRef.current || 0
+      );
+    }
     if (recordingTimerRef.current) {
       clearInterval(recordingTimerRef.current);
     }
@@ -507,6 +574,8 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
 
   // Stop recording
   const stopRecording = () => {
+    speechService.stop();
+    setLiveInterimText('');
     if (recordingTimerRef.current) {
       clearInterval(recordingTimerRef.current);
       recordingTimerRef.current = null;
@@ -583,34 +652,19 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
               </button>
             )}
 
-            {/* Download MP3 Action */}
+            {/* Download Audio Action */}
             {currentSession?.audioBlob && (
               <button
-                onClick={async () => {
-                  if (currentSession.audioBlob && !isConvertingMp3) {
-                    try {
-                      setIsConvertingMp3(true);
-                      await downloadAudioAsMp3(currentSession.audioBlob, currentSession.title || 'recording');
-                    } finally {
-                      setIsConvertingMp3(false);
-                    }
+                onClick={() => {
+                  if (currentSession.audioBlob) {
+                    downloadNativeAudio(currentSession.audioBlob, currentSession.title || 'recording');
                   }
                 }}
-                disabled={isConvertingMp3}
-                title={isConvertingMp3 ? 'Converting audio to MP3 in background worker...' : 'Download recording as MP3 file'}
-                className="px-2.5 py-1 rounded-lg bg-white dark:bg-stone-800 hover:bg-[#f0ece4] dark:hover:bg-stone-700 border border-[#e8e4dc] dark:border-stone-700 text-stone-800 dark:text-stone-200 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs shrink-0 disabled:opacity-60 disabled:cursor-wait"
+                title="Download recording audio file"
+                className="px-2.5 py-1 rounded-lg bg-white dark:bg-stone-800 hover:bg-[#f0ece4] dark:hover:bg-stone-700 border border-[#e8e4dc] dark:border-stone-700 text-stone-800 dark:text-stone-200 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs shrink-0"
               >
-                {isConvertingMp3 ? (
-                  <>
-                    <Loader2 className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400 animate-spin" />
-                    <span>Converting...</span>
-                  </>
-                ) : (
-                  <>
-                    <Download className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
-                    <span>Download MP3</span>
-                  </>
-                )}
+                <Download className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                <span>Download Audio</span>
               </button>
             )}
           </div>
@@ -758,6 +812,35 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
               )}
             </div>
 
+            {/* Live Web Speech Dictation Display */}
+            {useLiveTranscription && (
+              <div className="mb-3 p-3 rounded-xl bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-800 text-xs shadow-2xs space-y-1.5">
+                <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
+                  <span className="flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                    Live Dictation (Web Speech API)
+                  </span>
+                  <span className="text-stone-400 dark:text-stone-500 font-mono text-[9px]">Continuous</span>
+                </div>
+                <div className="max-h-28 overflow-y-auto space-y-1 font-mono text-[11px] leading-relaxed">
+                  {liveTranscript ? (
+                    <div className="text-stone-800 dark:text-stone-200 whitespace-pre-wrap">
+                      {liveTranscript}
+                    </div>
+                  ) : null}
+                  {liveInterimText ? (
+                    <div className="text-indigo-600 dark:text-indigo-400 opacity-75 italic">
+                      {liveInterimText}...
+                    </div>
+                  ) : !liveTranscript ? (
+                    <div className="text-stone-400 dark:text-stone-500 italic">
+                      Listening for speech...
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            )}
+
             {/* Action Buttons: Pause/Resume + Stop */}
             <div className="flex items-center gap-2">
               {isRecordingPaused ? (
@@ -840,29 +923,19 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
 
             {/* Post-recording Toolset Quick Bar */}
             <div className="flex flex-wrap items-center gap-2 pt-1.5 border-t border-emerald-500/10">
-              {/* Download MP3 Action */}
+              {/* Download Audio Action */}
               <button
                 type="button"
-                onClick={async () => {
-                  if (currentSession.audioBlob && !isConvertingMp3) {
-                    try {
-                      setIsConvertingMp3(true);
-                      await downloadAudioAsMp3(currentSession.audioBlob, currentSession.title || 'recording');
-                    } finally {
-                      setIsConvertingMp3(false);
-                    }
+                onClick={() => {
+                  if (currentSession.audioBlob) {
+                    downloadNativeAudio(currentSession.audioBlob, currentSession.title || 'recording');
                   }
                 }}
-                disabled={isConvertingMp3}
-                title={isConvertingMp3 ? 'Converting audio to MP3...' : 'Download recording as MP3 file'}
-                className="py-1.5 px-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs shrink-0 disabled:opacity-60 disabled:cursor-wait"
+                title="Download recording audio file"
+                className="py-1.5 px-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs shrink-0"
               >
-                {isConvertingMp3 ? (
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                ) : (
-                  <Download className="w-3.5 h-3.5" />
-                )}
-                <span>Download MP3</span>
+                <Download className="w-3.5 h-3.5" />
+                <span>Download Audio</span>
               </button>
 
               {/* Export Notes Action */}
@@ -881,17 +954,17 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
                 <span>Export Notes (.md)</span>
               </button>
 
-              {/* Transcribe Action */}
+              {/* Transcribe Offline Action */}
               {onTranscribeAudio && (
                 !isTranscribing ? (
                   <button
                     type="button"
                     onClick={onTranscribeAudio}
-                    title="Transcribe audio with speech recognition"
+                    title="Transcribe recording locally with Moonshine Web Worker (100% offline)"
                     className="py-1.5 px-2.5 rounded-lg bg-white dark:bg-stone-800 hover:bg-[#f0ece4] dark:hover:bg-stone-700 text-stone-800 dark:text-stone-200 border border-[#e8e4dc] dark:border-stone-700 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs"
                   >
                     <Sparkles className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
-                    <span>Transcribe</span>
+                    <span>Transcribe Offline</span>
                   </button>
                 ) : (
                   <button
@@ -976,45 +1049,69 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
             <div className="p-3 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200/80 dark:border-amber-800/60 text-xs text-amber-800 dark:text-amber-200 flex items-start gap-2 shadow-2xs leading-relaxed">
               <span className="shrink-0 text-sm select-none">💡</span>
               <span>
-                <strong className="font-semibold">Tip:</strong> Always download your MP3 and export your notes as a backup. Since Pinpoint operates entirely offline, your files cannot be recovered if your browser data is cleared.
+                <strong className="font-semibold">Tip:</strong> Always download your audio and export your notes as a backup. Since Pinpoint operates entirely offline, your files cannot be recovered if your browser data is cleared.
               </span>
             </div>
           </div>
         ) : (
-          <div className="grid grid-cols-3 md:grid-cols-4 gap-2">
-            <button
-              onClick={() => startRecording('mic')}
-              className="py-2.5 px-2 bg-neutral-900 hover:bg-neutral-800 dark:bg-neutral-100 dark:hover:bg-white text-white dark:text-neutral-900 font-medium rounded-lg text-xs flex flex-col sm:flex-row items-center justify-center gap-1.5 transition-colors shadow-sm cursor-pointer whitespace-nowrap"
-              title="Record Microphone audio only"
-            >
-              <Mic className="w-4 h-4 text-rose-500 shrink-0" />
-              <span className="truncate">Record Mic</span>
-            </button>
+          <div className="space-y-3">
+            {/* Live Transcription Privacy Toggle */}
+            <div className="p-3 rounded-xl bg-white dark:bg-stone-900 border border-[#e8e4dc] dark:border-stone-800 space-y-1.5 shadow-2xs">
+              <label className="flex items-center justify-between cursor-pointer select-none">
+                <span className="text-xs font-semibold text-stone-900 dark:text-stone-100 flex items-center gap-1.5">
+                  <span>Enable Live Transcription</span>
+                  {useLiveTranscription && (
+                    <span className="px-1.5 py-0.2 rounded text-[10px] font-bold bg-emerald-100 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300">
+                      Live ON
+                    </span>
+                  )}
+                </span>
+                <input
+                  type="checkbox"
+                  checked={useLiveTranscription}
+                  onChange={(e) => setUseLiveTranscription(e.target.checked)}
+                  className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                />
+              </label>
+              <p className="text-[11px] text-amber-800 dark:text-amber-300/90 leading-relaxed">
+                ⚠️ Notice: Live transcription uses your browser&apos;s built-in dictation engine, which may send audio to Google or Apple servers. Leave this off for strictly private, offline processing.
+              </p>
+            </div>
 
-            <button
-              onClick={() => startRecording('meeting')}
-              className="hidden md:flex py-2.5 px-2 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-lg text-xs flex-col sm:flex-row items-center justify-center gap-1.5 transition-colors shadow-sm cursor-pointer whitespace-nowrap"
-              title="Record Meeting: Captures Teams / Zoom / Tab system audio + your microphone mixed together"
-            >
-              <Monitor className="w-4 h-4 text-white shrink-0" />
-              <span className="truncate">Record Meeting</span>
-            </button>
+            <div className="grid grid-cols-3 md:grid-cols-4 gap-2">
+              <button
+                onClick={() => startRecording('mic')}
+                className="py-2.5 px-2 bg-neutral-900 hover:bg-neutral-800 dark:bg-neutral-100 dark:hover:bg-white text-white dark:text-neutral-900 font-medium rounded-lg text-xs flex flex-col sm:flex-row items-center justify-center gap-1.5 transition-colors shadow-sm cursor-pointer whitespace-nowrap"
+                title="Record Microphone audio only"
+              >
+                <Mic className="w-4 h-4 text-rose-500 shrink-0" />
+                <span className="truncate">Record Mic</span>
+              </button>
 
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              className="py-2.5 px-2 bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-800 dark:text-neutral-200 font-medium rounded-lg text-xs flex flex-col sm:flex-row items-center justify-center gap-1.5 transition-colors cursor-pointer border border-neutral-200 dark:border-neutral-700 whitespace-nowrap"
-              title="Upload audio file"
-            >
-              <Upload className="w-4 h-4 text-indigo-500 shrink-0" />
-              <span className="truncate">Audio</span>
-            </button>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="audio/*"
-              className="hidden"
-              onChange={handleFileUpload}
-            />
+              <button
+                onClick={() => startRecording('meeting')}
+                className="hidden md:flex py-2.5 px-2 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-lg text-xs flex-col sm:flex-row items-center justify-center gap-1.5 transition-colors shadow-sm cursor-pointer whitespace-nowrap"
+                title="Record Meeting: Captures Teams / Zoom / Tab system audio + your microphone mixed together"
+              >
+                <Monitor className="w-4 h-4 text-white shrink-0" />
+                <span className="truncate">Record Meeting</span>
+              </button>
+
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                className="py-2.5 px-2 bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-800 dark:text-neutral-200 font-medium rounded-lg text-xs flex flex-col sm:flex-row items-center justify-center gap-1.5 transition-colors cursor-pointer border border-neutral-200 dark:border-neutral-700 whitespace-nowrap"
+                title="Upload audio file"
+              >
+                <Upload className="w-4 h-4 text-indigo-500 shrink-0" />
+                <span className="truncate">Audio</span>
+              </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="audio/webm, audio/mp4, audio/mp3, audio/wav, audio/*"
+                className="hidden"
+                onChange={handleFileUpload}
+              />
 
             <button
               onClick={() => slideFileInputRef.current?.click()}
@@ -1029,21 +1126,22 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
                 </span>
               )}
             </button>
-            <input
-              ref={slideFileInputRef}
-              type="file"
-              accept="image/*,application/pdf"
-              multiple
-              className="hidden"
-              onChange={(e) => {
-                if (e.target.files && e.target.files.length > 0) {
-                  Array.from(e.target.files).forEach((file) => {
-                    if (onUploadSlide) onUploadSlide(file);
-                  });
-                  e.target.value = '';
-                }
-              }}
-            />
+              <input
+                ref={slideFileInputRef}
+                type="file"
+                accept="image/*,application/pdf"
+                multiple
+                className="hidden"
+                onChange={(e) => {
+                  if (e.target.files && e.target.files.length > 0) {
+                    Array.from(e.target.files).forEach((file) => {
+                      if (onUploadSlide) onUploadSlide(file);
+                    });
+                    e.target.value = '';
+                  }
+                }}
+              />
+            </div>
           </div>
         )}
 
@@ -1324,7 +1422,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
                   disabled={!currentSession?.audioBlob}
                   title={
                     currentSession?.audioBlob
-                      ? 'Transcribe audio with local speech recognition'
+                      ? 'Transcribe audio locally with Moonshine speech recognition (100% offline)'
                       : 'Record or upload an audio track first to transcribe'
                   }
                   className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer shadow-2xs ${
@@ -1334,7 +1432,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
                   }`}
                 >
                   <Sparkles className="w-3.5 h-3.5" />
-                  <span>Transcribe Audio</span>
+                  <span>Transcribe Offline</span>
                 </button>
               ) : (
                 <button

@@ -32,6 +32,7 @@ import {
   Edit2,
   ArrowRightLeft,
   FileDown,
+  Upload,
 } from 'lucide-react';
 import { exportSessionToMarkdown, hasSessionExportableContent } from './services/exportService';
 
@@ -80,6 +81,7 @@ export default function App() {
   const [isSyncOpen, setIsSyncOpen] = useState<boolean>(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState<boolean>(false);
+  const mainAudioImportRef = useRef<HTMLInputElement | null>(null);
 
   // Audio element ref
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -524,6 +526,8 @@ export default function App() {
         );
         setCurrentSessionId(updatedSession.id);
         setDuration(audioDuration);
+        setCurrentView('workspace');
+        setShowMobileNotes(false);
 
         if (audioUrl) {
           URL.revokeObjectURL(audioUrl);
@@ -533,7 +537,7 @@ export default function App() {
 
         const usage = await dbService.estimateStorageUsage();
         setStorageUsage(usage);
-        showToast(`Uploaded "${file.name}" to IndexedDB!`);
+        showToast(`Imported "${file.name}" into session!`);
         return;
       }
 
@@ -556,10 +560,12 @@ export default function App() {
       setSessions(updatedSessions);
       setCurrentSessionId(newSessionId);
       setDuration(audioDuration);
+      setCurrentView('workspace');
+      setShowMobileNotes(false);
 
       const usage = await dbService.estimateStorageUsage();
       setStorageUsage(usage);
-      showToast(`Uploaded "${file.name}" to IndexedDB!`);
+      showToast(`Imported "${file.name}" into new session!`);
     };
 
     tempAudio.onerror = () => {
@@ -1410,6 +1416,28 @@ export default function App() {
             <span className="hidden sm:inline capitalize">{settings.theme}</span>
           </button>
 
+          {/* Import Audio Action in Header */}
+          <button
+            onClick={() => mainAudioImportRef.current?.click()}
+            title="Import Audio File (.webm, .m4a, .mp3, .wav)"
+            className="px-2.5 py-1.5 rounded-xl border border-[#e8e4dc] dark:border-stone-700 bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200 hover:bg-[#f0ece4] dark:hover:bg-stone-700 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs"
+          >
+            <Upload className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+            <span className="hidden sm:inline">Import Audio</span>
+          </button>
+          <input
+            ref={mainAudioImportRef}
+            type="file"
+            accept="audio/webm, audio/mp4, audio/mp3, audio/wav, audio/*"
+            className="hidden"
+            onChange={(e) => {
+              if (e.target.files && e.target.files[0]) {
+                handleAudioUploaded(e.target.files[0]);
+                e.target.value = '';
+              }
+            }}
+          />
+
           {/* WebRTC P2P Device Sync Button */}
           <button
             onClick={() => setIsSyncOpen(true)}
@@ -1483,6 +1511,7 @@ export default function App() {
           onCreateSessionInFolder={handleCreateSessionInFolder}
           onDeleteSession={handleDeleteSession}
           onAudioUploadedInFolder={handleAudioUploadedInFolder}
+          onImportAudio={handleAudioUploaded}
           onExportStandaloneHtml={handleExportStandaloneHtml}
           onOpenShortcuts={() => setIsShortcutsOpen(true)}
           onOpenSync={() => setIsSyncOpen(true)}
