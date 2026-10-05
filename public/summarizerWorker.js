@@ -1,5 +1,5 @@
 // public/summarizerWorker.js - Web Worker for local client-side summarization
-import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2';
+import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers';
 
 // Configure transformers environment for browser Web Worker
 env.allowLocalModels = false;

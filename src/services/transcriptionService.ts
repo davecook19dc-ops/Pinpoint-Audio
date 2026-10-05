@@ -89,7 +89,7 @@ class TranscriptionService {
         console.warn('Failed to initialize module worker from static path, attempting fallback:', err);
         // Fallback: create blob worker with dynamic import
         const fallbackScript = `
-          import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2';
+          import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers';
           env.allowLocalModels = false;
           env.useBrowserCache = true;
 
@@ -109,29 +109,13 @@ class TranscriptionService {
                 let float32Array = audioData instanceof Float32Array ? audioData : new Float32Array(audioData.buffer || audioData);
 
                 if (!transcriber) {
-                  self.postMessage({ type: 'status', status: 'init', message: 'Loading Whisper-tiny.en model...' });
-                  const hasWebGpu = typeof navigator !== 'undefined' && 'gpu' in navigator && !!navigator.gpu;
-                  if (hasWebGpu) {
-                    try {
-                      const webGpuPromise = pipeline('automatic-speech-recognition', 'Xenova/whisper-tiny.en', {
-                        device: 'webgpu',
-                        quantized: true,
-                        progress_callback: (p) => self.postMessage({ type: 'download_progress', progressData: p }),
-                      });
-                      const timeoutPromise = new Promise((_, rej) => setTimeout(() => rej(new Error('WebGPU timeout')), 12000));
-                      transcriber = await Promise.race([webGpuPromise, timeoutPromise]);
-                    } catch (webGpuErr) {
-                      console.warn('WebGPU init failed, using CPU fallback:', webGpuErr);
-                      transcriber = null;
-                    }
-                  }
-                  if (!transcriber) {
-                    if (env.backends?.onnx?.wasm) env.backends.onnx.wasm.numThreads = numThreads;
-                    transcriber = await pipeline('automatic-speech-recognition', 'Xenova/whisper-tiny.en', {
-                      quantized: true,
-                      progress_callback: (p) => self.postMessage({ type: 'download_progress', progressData: p }),
-                    });
-                  }
+                  self.postMessage({ type: 'status', status: 'init', message: 'Loading Moonshine model (onnx-community/moonshine-tiny-ONNX)...' });
+                  transcriber = await pipeline('automatic-speech-recognition', 'onnx-community/moonshine-tiny-ONNX', {
+                    dtype: 'q4',
+                    device: 'wasm',
+                    quantized: true,
+                    progress_callback: (p) => self.postMessage({ type: 'download_progress', progressData: p }),
+                  });
                   console.log('Model loaded on:', transcriber?.device || 'wasm');
                 }
                 self.postMessage({ type: 'status', status: 'transcribing', message: 'Transcribing speech to text...' });
@@ -176,34 +160,23 @@ class TranscriptionService {
                   });
                 };
 
-                let res;
-                try {
-                  res = await transcriber(float32Array, {
-                    chunk_length_s: 30,
-                    stride_length_s: 5,
-                    language: 'en',
-                    task: 'transcribe',
-                    return_timestamps: true,
-                    chunk_callback,
-                    ...options,
-                  });
-                } catch (infErr) {
-                  console.warn('Inference error in fallback worker, retrying WASM (CPU):', infErr);
-                  if (env.backends?.onnx?.wasm) env.backends.onnx.wasm.numThreads = numThreads;
-                  transcriber = await pipeline('automatic-speech-recognition', 'Xenova/whisper-tiny.en', {
-                    quantized: true,
-                  });
-                  res = await transcriber(float32Array, {
-                    chunk_length_s: 30,
-                    stride_length_s: 5,
-                    language: 'en',
-                    task: 'transcribe',
-                    return_timestamps: true,
-                    chunk_callback,
-                    ...options,
-                  });
+                const { language, task, ...cleanOptions } = options || {};
+                const res = await transcriber(float32Array, {
+                  chunk_length_s: 30,
+                  stride_length_s: 5,
+                  chunk_callback,
+                  ...cleanOptions,
+                });
+
+                let normalizedResult = res;
+                if (Array.isArray(res) && res.length > 0) {
+                  normalizedResult = res[0];
                 }
-                self.postMessage({ type: 'complete', result: res });
+                if (typeof normalizedResult === 'string') {
+                  normalizedResult = { text: normalizedResult };
+                }
+
+                self.postMessage({ type: 'complete', result: normalizedResult });
               } catch (err) {
                 self.postMessage({ type: 'error', error: err.message || String(err) });
               }
@@ -243,8 +216,8 @@ class TranscriptionService {
       onProgress({
         stage: 'loading_model',
         percent: 15,
-        message: 'Loading Whisper speech-to-text model...',
-        detail: 'Model: Xenova/whisper-tiny.en',
+        message: 'Loading Moonshine speech-to-text model...',
+        detail: 'Model: onnx-community/moonshine-tiny-ONNX (Q4 WASM)',
       });
 
       const worker = this.getWorker();

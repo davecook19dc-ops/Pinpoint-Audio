@@ -929,8 +929,8 @@ export default function App() {
 
     setIsTranscribing(true);
     setTranscriptionProgress(0);
-    setTranscriptionStatus('Initializing local Whisper model...');
-    setTranscriptionDetail('Loading Xenova/whisper-tiny.en via Web Worker (Quantized INT8)...');
+    setTranscriptionStatus('Initializing Moonshine model...');
+    setTranscriptionDetail('Loading onnx-community/moonshine-tiny-ONNX via Web Worker (Q4 WASM)...');
     setTranscriptionElapsed(0);
     setTranscriptionEta(undefined);
 
