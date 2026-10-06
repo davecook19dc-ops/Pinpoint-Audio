@@ -30,7 +30,7 @@ import {
   RefreshCw,
   FileDown,
 } from 'lucide-react';
-import { Note, Session } from '../types';
+import { Note, Session, TranscriptionChunk } from '../types';
 import { formatTime, downloadNativeAudio } from '../utils/audio';
 import { modifierKey } from '../utils/platform';
 import { exportSessionToMarkdown, generateMarkdownString, hasSessionExportableContent } from '../services/exportService';
@@ -61,18 +61,30 @@ interface AudioPlayerProps {
   onRateChange: (rate: number) => void;
   onVolumeChange: (vol: number) => void;
   onStartRecording?: (mode?: 'mic' | 'meeting') => Promise<string>;
-  onAudioRecorded: (blob: Blob, duration: number, fileName: string, targetSessionId?: string) => void;
+  onAudioRecorded: (
+    blob: Blob,
+    duration: number,
+    fileName: string,
+    targetSessionId?: string,
+    transcript?: string,
+    chunks?: TranscriptionChunk[]
+  ) => void;
   onAudioUploaded: (file: File) => void;
   onTriggerAddNote: () => void;
   onOpenMobileNotes?: () => void;
   onTranscribeAudio?: () => void;
   onCancelTranscription?: () => void;
-  onSaveTranscript?: (transcript: string) => void;
+  onSaveTranscript?: (
+    transcript: string,
+    chunks?: TranscriptionChunk[],
+    sessionId?: string
+  ) => void;
   onUploadSlide?: (file: File) => void;
   onOpenSlides?: () => void;
   onUpdateTitle?: (newTitle: string) => void;
   onDiscardAudio?: () => void;
   onExportNotes?: (session: Session) => void;
+  onShowToast?: (msg: string) => void;
 }
 
 export const AudioPlayer: React.FC<AudioPlayerProps> = ({
@@ -109,6 +121,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
   onUpdateTitle,
   onDiscardAudio,
   onExportNotes,
+  onShowToast,
 }) => {
   // Session Title inline editing state
   const [isEditingTitle, setIsEditingTitle] = useState(false);
@@ -135,7 +148,12 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
             .trim() || 'Lecture-Notes';
           const mdFileName = `${safeTitle}.md`;
           const saved = await fileSystemService.saveFileToDirectory(mdFileName, mdBlob);
-          if (saved) return;
+          if (saved) {
+            if (onShowToast) {
+              onShowToast(`Saved notes to local folder: ${mdFileName}`);
+            }
+            return;
+          }
         }
       }
     }
@@ -202,6 +220,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
   const [liveTranscript, setLiveTranscript] = useState<string>('');
   const [liveInterimText, setLiveInterimText] = useState<string>('');
   const liveTranscriptRef = useRef<string>('');
+  const liveChunksRef = useRef<Array<{ timestamp: [number, number]; text: string }>>([]);
 
   // References for recording
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -275,6 +294,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
     setMicError(null);
     setRecordingNotice(null);
     setRecordingMode(mode);
+    liveChunksRef.current = [];
 
     // Mobile Environment Check: mobile browsers do not support getDisplayMedia system audio
     const isMobileDevice =
@@ -458,7 +478,25 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
         const fileName = `${prefix}_${timestamp}.${selectedMime.includes('ogg') ? 'ogg' : 'webm'}`;
 
         const sessionToUpdate = activeRecordingSessionIdRef.current || currentSession?.id;
-        onAudioRecorded(finalBlob, recordedDuration, fileName, sessionToUpdate);
+        const currentTranscript = liveTranscriptRef.current ? liveTranscriptRef.current : undefined;
+        const currentChunks =
+          liveChunksRef.current.length > 0 ? [...liveChunksRef.current] : undefined;
+
+        onAudioRecorded(
+          finalBlob,
+          recordedDuration,
+          fileName,
+          sessionToUpdate,
+          currentTranscript,
+          currentChunks
+        );
+
+        if (useLiveTranscription && currentTranscript) {
+          if (onShowToast) {
+            onShowToast('Recording & live transcript saved to Transcript tab!');
+          }
+        }
+
         activeRecordingSessionIdRef.current = null;
         setRecordingSeconds(0);
         recordingSecondsRef.current = 0;
@@ -488,6 +526,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
       // Start live speech recognition if user opted in
       if (useLiveTranscription) {
         liveTranscriptRef.current = '';
+        liveChunksRef.current = [];
         setLiveTranscript('');
         setLiveInterimText('');
         speechService.start(
@@ -504,9 +543,14 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
               liveTranscriptRef.current = updated;
               setLiveTranscript(updated);
               setLiveInterimText('');
+
+              const startSec = Math.max(0, timestampSec - 3);
+              const endSec = timestampSec;
+              liveChunksRef.current.push({ timestamp: [startSec, endSec], text: finalText });
+
               const sid = activeRecordingSessionIdRef.current || currentSession?.id;
               if (sid && onSaveTranscript) {
-                onSaveTranscript(updated);
+                onSaveTranscript(updated, liveChunksRef.current, sid);
               }
             },
             onError: (err) => {
@@ -581,9 +625,14 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
             liveTranscriptRef.current = updated;
             setLiveTranscript(updated);
             setLiveInterimText('');
+
+            const startSec = Math.max(0, timestampSec - 3);
+            const endSec = timestampSec;
+            liveChunksRef.current.push({ timestamp: [startSec, endSec], text: finalText });
+
             const sid = activeRecordingSessionIdRef.current || currentSession?.id;
             if (sid && onSaveTranscript) {
-              onSaveTranscript(updated);
+              onSaveTranscript(updated, liveChunksRef.current, sid);
             }
           },
         },

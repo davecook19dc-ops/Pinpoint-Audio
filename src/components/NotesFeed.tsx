@@ -55,6 +55,8 @@ interface NotesFeedProps {
   onDeleteSlide?: (slideId: string) => void;
   onUpdateSlideTimestamp?: (slideId: string, timestamp?: number) => void;
   onUpdateSlideAnnotation?: (slideId: string, annotationDataUrl?: string) => void;
+  activeTab?: 'notes' | 'transcript' | 'slides';
+  onTabChange?: (tab: 'notes' | 'transcript' | 'slides') => void;
 }
 
 export const NotesFeed: React.FC<NotesFeedProps> = ({
@@ -74,9 +76,16 @@ export const NotesFeed: React.FC<NotesFeedProps> = ({
   onDeleteSlide,
   onUpdateSlideTimestamp,
   onUpdateSlideAnnotation,
+  activeTab: activeTabProp,
+  onTabChange,
 }) => {
   // Active right panel view: 'notes' | 'transcript' | 'slides'
-  const [activeTab, setActiveTab] = useState<'notes' | 'transcript' | 'slides'>('notes');
+  const [internalTab, setInternalTab] = useState<'notes' | 'transcript' | 'slides'>('notes');
+  const activeTab = activeTabProp !== undefined ? activeTabProp : internalTab;
+  const setActiveTab = (tab: 'notes' | 'transcript' | 'slides') => {
+    setInternalTab(tab);
+    onTabChange?.(tab);
+  };
 
   // Floating Overlay Composer state
   const [isComposerOpen, setIsComposerOpen] = useState(false);

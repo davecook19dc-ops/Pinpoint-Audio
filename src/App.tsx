@@ -143,6 +143,7 @@ export default function App() {
   // Quick note trigger state (e.g. from Ctrl+M)
   const [quickAddTriggered, setQuickAddTriggered] = useState<boolean>(false);
   const [showMobileNotes, setShowMobileNotes] = useState<boolean>(false);
+  const [notesFeedTab, setNotesFeedTab] = useState<'notes' | 'transcript' | 'slides'>('notes');
   const [isShortcutsOpen, setIsShortcutsOpen] = useState<boolean>(false);
   const [isSyncOpen, setIsSyncOpen] = useState<boolean>(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -444,7 +445,9 @@ export default function App() {
     blob: Blob,
     recDuration: number,
     fileName: string,
-    targetSessionId?: string
+    targetSessionId?: string,
+    transcript?: string,
+    chunks?: TranscriptionChunk[]
   ) => {
     const safeDuration = isFinite(recDuration) && recDuration > 0 ? Math.round(recDuration) : 1;
     const sessionIdToUpdate = targetSessionId || currentSessionId;
@@ -464,6 +467,8 @@ export default function App() {
           audioBlob: blob,
           audioMimeType: blob.type,
           audioFileName: fileName,
+          ...(transcript ? { transcript } : {}),
+          ...(chunks && chunks.length > 0 ? { chunks } : {}),
           updatedAt: Date.now(),
         };
 
@@ -475,6 +480,11 @@ export default function App() {
         );
         setCurrentSessionId(updatedSession.id);
         setDuration(safeDuration);
+
+        // If a live transcript was captured, switch the right-hand panel to the transcript tab
+        if (transcript) {
+          setNotesFeedTab('transcript');
+        }
 
         // Revoke previous audioUrl if any and set new one
         if (audioUrl) {
@@ -492,9 +502,17 @@ export default function App() {
           const mdString = generateMarkdownString(updatedSession, notes);
           const mdBlob = new Blob([mdString], { type: 'text/markdown;charset=utf-8' });
           await fileSystemService.saveFileToDirectory(fileName.replace(/\.[^/.]+$/, ".md"), mdBlob);
-          showToast(`Saved to local folder: ${fileName}`);
+          if (transcript) {
+            showToast('Recording & live transcript saved to Transcript tab!');
+          } else {
+            showToast(`Saved to local folder: ${fileName}`);
+          }
         } else {
-          showToast('Voice recording saved to IndexedDB!');
+          if (transcript) {
+            showToast('Recording & live transcript saved to Transcript tab!');
+          } else {
+            showToast('Voice recording saved to IndexedDB!');
+          }
         }
         return;
       }
@@ -512,6 +530,8 @@ export default function App() {
       audioBlob: blob,
       audioMimeType: blob.type,
       audioFileName: fileName,
+      ...(transcript ? { transcript } : {}),
+      ...(chunks && chunks.length > 0 ? { chunks } : {}),
     };
 
     await dbService.saveSession(newSession);
@@ -519,6 +539,10 @@ export default function App() {
     setSessions(updatedSessions);
     setCurrentSessionId(newSessionId);
     setDuration(safeDuration);
+
+    if (transcript) {
+      setNotesFeedTab('transcript');
+    }
 
     const usage = await dbService.estimateStorageUsage();
     setStorageUsage(usage);
@@ -529,9 +553,17 @@ export default function App() {
       const mdString = generateMarkdownString(newSession, notes);
       const mdBlob = new Blob([mdString], { type: 'text/markdown;charset=utf-8' });
       await fileSystemService.saveFileToDirectory(fileName.replace(/\.[^/.]+$/, ".md"), mdBlob);
-      showToast(`Saved to local folder: ${fileName}`);
+      if (transcript) {
+        showToast('Recording & live transcript saved to Transcript tab!');
+      } else {
+        showToast(`Saved to local folder: ${fileName}`);
+      }
     } else {
-      showToast('Voice recording saved to IndexedDB!');
+      if (transcript) {
+        showToast('Recording & live transcript saved to Transcript tab!');
+      } else {
+        showToast('Voice recording saved to IndexedDB!');
+      }
     }
   };
 
@@ -1722,6 +1754,7 @@ export default function App() {
                 }
               }}
               onExportNotes={handleExportNotes}
+              onShowToast={showToast}
             />
           </div>
 
@@ -1745,6 +1778,8 @@ export default function App() {
               onDeleteSlide={handleDeleteSlide}
               onUpdateSlideTimestamp={handleUpdateSlideTimestamp}
               onUpdateSlideAnnotation={handleUpdateSlideAnnotation}
+              activeTab={notesFeedTab}
+              onTabChange={setNotesFeedTab}
             />
           </div>
         </div>
