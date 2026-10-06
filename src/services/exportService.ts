@@ -3,6 +3,25 @@ import { dbService } from './db';
 import { formatTime } from '../utils/audio';
 
 /**
+ * Generates the raw Markdown string of session notes and transcript without triggering a download.
+ */
+export function generateMarkdownString(session: Session, notes: Note[]): string {
+  let md = `# ${session.title}\n\n`;
+  md += `**Date:** ${new Date(session.createdAt).toLocaleDateString()}\n\n`;
+  if (notes.length > 0) {
+    md += `## Notes\n\n`;
+    notes.forEach(n => {
+      md += `- [${n.calloutType.toUpperCase()}] **${formatTime(n.timestamp)}**: ${n.content}\n`;
+    });
+    md += `\n`;
+  }
+  if (session.transcript) {
+    md += `## Transcript\n\n${session.transcript}\n`;
+  }
+  return md;
+}
+
+/**
  * Checks if a session has any exportable content (notes, transcript, or chunks).
  */
 export function hasSessionExportableContent(

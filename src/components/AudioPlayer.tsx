@@ -33,9 +33,10 @@ import {
 import { Note, Session } from '../types';
 import { formatTime, downloadNativeAudio } from '../utils/audio';
 import { modifierKey } from '../utils/platform';
-import { exportSessionToMarkdown, hasSessionExportableContent } from '../services/exportService';
+import { exportSessionToMarkdown, generateMarkdownString, hasSessionExportableContent } from '../services/exportService';
 import { checkWebGPUSupport } from '../utils/webgpu';
 import { speechService } from '../services/speechService';
+import { fileSystemService } from '../services/fileSystemService';
 
 interface AudioPlayerProps {
   currentSession: Session | null;
@@ -71,6 +72,7 @@ interface AudioPlayerProps {
   onOpenSlides?: () => void;
   onUpdateTitle?: (newTitle: string) => void;
   onDiscardAudio?: () => void;
+  onExportNotes?: (session: Session) => void;
 }
 
 export const AudioPlayer: React.FC<AudioPlayerProps> = ({
@@ -106,11 +108,40 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
   onOpenSlides,
   onUpdateTitle,
   onDiscardAudio,
+  onExportNotes,
 }) => {
   // Session Title inline editing state
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [titleInput, setTitleInput] = useState(currentSession?.title || '');
   const titleInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Manual Note Export: writes to local folder if configured and permitted, else triggers browser download
+  const handleExportNotesClick = async () => {
+    if (!currentSession) return;
+    if (onExportNotes) {
+      onExportNotes(currentSession);
+      return;
+    }
+
+    if (fileSystemService.isSupported()) {
+      const handle = await fileSystemService.getStoredHandle();
+      if (handle) {
+        const hasPerm = await fileSystemService.verifyPermission(handle);
+        if (hasPerm) {
+          const mdString = generateMarkdownString(currentSession, notes);
+          const mdBlob = new Blob([mdString], { type: 'text/markdown;charset=utf-8' });
+          const safeTitle = (currentSession.title || 'Lecture-Notes')
+            .replace(/[\\/:*?"<>|]/g, '_')
+            .trim() || 'Lecture-Notes';
+          const mdFileName = `${safeTitle}.md`;
+          const saved = await fileSystemService.saveFileToDirectory(mdFileName, mdBlob);
+          if (saved) return;
+        }
+      }
+    }
+
+    await exportSessionToMarkdown(currentSession, notes);
+  };
 
   useEffect(() => {
     setTitleInput(currentSession?.title || '');
@@ -638,7 +669,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
             {currentSession && (
               <button
                 type="button"
-                onClick={() => exportSessionToMarkdown(currentSession, notes)}
+                onClick={handleExportNotesClick}
                 disabled={!hasExportableContent}
                 title={
                   hasExportableContent
@@ -941,7 +972,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
               {/* Export Notes Action */}
               <button
                 type="button"
-                onClick={() => currentSession && exportSessionToMarkdown(currentSession, notes)}
+                onClick={handleExportNotesClick}
                 disabled={!hasExportableContent}
                 title={
                   hasExportableContent

@@ -3,6 +3,6 @@
  */
 export { AudioPlayer as RecordingView } from './AudioPlayer';
 export { AudioPlayer } from './AudioPlayer';
-export { exportSessionToMarkdown, compileSessionToMarkdown } from '../services/exportService';
+export { exportSessionToMarkdown, compileSessionToMarkdown, generateMarkdownString } from '../services/exportService';
 export { checkWebGPUSupport } from '../utils/webgpu';
 export { speechService } from '../services/speechService';

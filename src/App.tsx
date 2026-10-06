@@ -33,13 +33,78 @@ import {
   ArrowRightLeft,
   FileDown,
   Upload,
+  HardDrive,
 } from 'lucide-react';
-import { exportSessionToMarkdown, hasSessionExportableContent } from './services/exportService';
+import { exportSessionToMarkdown, generateMarkdownString, hasSessionExportableContent } from './services/exportService';
+import { fileSystemService } from './services/fileSystemService';
 
 export default function App() {
   // App Navigation View: 'dashboard' (folder-first grid) vs 'workspace' (split-screen editor)
   const [currentView, setCurrentView] = useState<'dashboard' | 'workspace'>('dashboard');
   const [selectedFolderForDrilldown, setSelectedFolderForDrilldown] = useState<string | null | 'bin'>(null);
+
+  // Local File System Access state (Chromium auto-save to disk)
+  const [localDirName, setLocalDirName] = useState<string | null>(null);
+  const [isFsSupported, setIsFsSupported] = useState<boolean>(false);
+
+  useEffect(() => {
+    const supported = fileSystemService.isSupported();
+    setIsFsSupported(supported);
+    if (supported) {
+      fileSystemService.getStoredHandle().then((handle) => {
+        if (handle) {
+          setLocalDirName(handle.name);
+        }
+      });
+    }
+  }, []);
+
+  const handleSelectLocalFolder = async () => {
+    if (!fileSystemService.isSupported()) return;
+    const handle = await fileSystemService.selectDirectory();
+    if (handle) {
+      setLocalDirName(handle.name);
+      showToast('Local save directory configured!');
+    }
+  };
+
+  // Manual note export: writes silently to local folder if configured and permitted, else triggers browser download
+  const handleExportNotes = async (sessionToExport?: Session) => {
+    const sess = sessionToExport || currentSession;
+    if (!sess) return;
+
+    let sessNotes = notes;
+    if (!sessNotes || sessNotes.length === 0 || (currentSession && sess.id !== currentSession.id)) {
+      try {
+        sessNotes = await dbService.getNotesBySession(sess.id);
+      } catch {
+        sessNotes = [];
+      }
+    }
+
+    if (fileSystemService.isSupported()) {
+      const handle = await fileSystemService.getStoredHandle();
+      if (handle) {
+        const hasPerm = await fileSystemService.verifyPermission(handle);
+        if (hasPerm) {
+          const mdString = generateMarkdownString(sess, sessNotes);
+          const mdBlob = new Blob([mdString], { type: 'text/markdown;charset=utf-8' });
+          const safeTitle = (sess.title || 'Lecture-Notes')
+            .replace(/[\\/:*?"<>|]/g, '_')
+            .trim() || 'Lecture-Notes';
+          const mdFileName = `${safeTitle}.md`;
+          const saved = await fileSystemService.saveFileToDirectory(mdFileName, mdBlob);
+          if (saved) {
+            showToast(`Saved notes to local folder: ${mdFileName}`);
+            return;
+          }
+        }
+      }
+    }
+
+    // Fall back to browser download
+    await exportSessionToMarkdown(sess, sessNotes);
+  };
 
   // Database entities
   const [folders, setFolders] = useState<Folder[]>([]);
@@ -420,7 +485,17 @@ export default function App() {
 
         const usage = await dbService.estimateStorageUsage();
         setStorageUsage(usage);
-        showToast('Voice recording saved to IndexedDB!');
+
+        // Auto-save recording and notes directly to disk if local folder configured
+        const savedLocally = await fileSystemService.saveFileToDirectory(fileName, blob);
+        if (savedLocally) {
+          const mdString = generateMarkdownString(updatedSession, notes);
+          const mdBlob = new Blob([mdString], { type: 'text/markdown;charset=utf-8' });
+          await fileSystemService.saveFileToDirectory(fileName.replace(/\.[^/.]+$/, ".md"), mdBlob);
+          showToast(`Saved to local folder: ${fileName}`);
+        } else {
+          showToast('Voice recording saved to IndexedDB!');
+        }
         return;
       }
     }
@@ -447,7 +522,17 @@ export default function App() {
 
     const usage = await dbService.estimateStorageUsage();
     setStorageUsage(usage);
-    showToast('Voice recording saved to IndexedDB!');
+
+    // Auto-save recording and notes directly to disk if local folder configured
+    const savedLocally = await fileSystemService.saveFileToDirectory(fileName, blob);
+    if (savedLocally) {
+      const mdString = generateMarkdownString(newSession, notes);
+      const mdBlob = new Blob([mdString], { type: 'text/markdown;charset=utf-8' });
+      await fileSystemService.saveFileToDirectory(fileName.replace(/\.[^/.]+$/, ".md"), mdBlob);
+      showToast(`Saved to local folder: ${fileName}`);
+    } else {
+      showToast('Voice recording saved to IndexedDB!');
+    }
   };
 
   const handleDiscardAudio = async () => {
@@ -1477,6 +1562,36 @@ export default function App() {
             }}
           />
 
+          {/* Local Folder Auto-Save Button (Chrome/Edge File System Access API) */}
+          {isFsSupported ? (
+            <button
+              onClick={handleSelectLocalFolder}
+              title={
+                localDirName
+                  ? `Recordings auto-save directly to local folder /${localDirName}. Click to change folder.`
+                  : 'Pick a folder on your computer to auto-save recordings to disk (File System Access API)'
+              }
+              className={`px-2.5 py-1.5 rounded-xl border text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs ${
+                localDirName
+                  ? 'bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/60 dark:hover:bg-amber-900/60 border-amber-300 dark:border-amber-800 text-amber-900 dark:text-amber-200'
+                  : 'border-[#e8e4dc] dark:border-stone-700 bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200 hover:bg-[#f0ece4] dark:hover:bg-stone-700'
+              }`}
+            >
+              <HardDrive className={`w-3.5 h-3.5 ${localDirName ? 'text-amber-600 dark:text-amber-400' : 'text-indigo-600 dark:text-indigo-400'}`} />
+              <span className="hidden sm:inline">
+                {localDirName ? `📁 Saving to: /${localDirName}` : 'Set Local Folder'}
+              </span>
+            </button>
+          ) : (
+            <div
+              title="Direct local folder writing requires Chrome, Edge, or Opera (File System Access API)"
+              className="px-2.5 py-1.5 rounded-xl border border-stone-200 dark:border-stone-800 bg-stone-100 dark:bg-stone-800/60 text-stone-400 dark:text-stone-500 text-xs font-medium flex items-center gap-1.5 cursor-not-allowed select-none opacity-80"
+            >
+              <HardDrive className="w-3.5 h-3.5" />
+              <span className="hidden lg:inline">Local Folder (Chrome/Edge only)</span>
+            </div>
+          )}
+
           {/* WebRTC P2P Device Sync Button */}
           <button
             onClick={() => setIsSyncOpen(true)}
@@ -1504,7 +1619,7 @@ export default function App() {
 
           {currentView === 'workspace' && currentSession && (
             <button
-              onClick={() => exportSessionToMarkdown(currentSession, notes)}
+              onClick={() => handleExportNotes(currentSession)}
               disabled={!hasSessionExportableContent(currentSession, notes)}
               title={
                 hasSessionExportableContent(currentSession, notes)
@@ -1557,6 +1672,9 @@ export default function App() {
           onExportStandaloneHtml={handleExportStandaloneHtml}
           onOpenShortcuts={() => setIsShortcutsOpen(true)}
           onOpenSync={() => setIsSyncOpen(true)}
+          localDirName={localDirName}
+          onSelectLocalFolder={handleSelectLocalFolder}
+          onShowToast={showToast}
         />
       ) : (
         /* Workspace View: Split-Screen Editor on Desktop, Tabbed Switcher on Mobile */
@@ -1603,6 +1721,7 @@ export default function App() {
                   handleUpdateSessionTitle(currentSessionId, newTitle);
                 }
               }}
+              onExportNotes={handleExportNotes}
             />
           </div>
 

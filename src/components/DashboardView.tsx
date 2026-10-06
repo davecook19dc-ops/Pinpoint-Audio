@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Folder as FolderIcon,
   Plus,
@@ -12,9 +12,11 @@ import {
   Loader2,
   ArrowRightLeft,
   RotateCcw,
+  HardDrive,
 } from 'lucide-react';
 import { Folder, Session } from '../types';
 import { formatTime, downloadNativeAudio } from '../utils/audio';
+import { fileSystemService } from '../services/fileSystemService';
 
 interface DashboardViewProps {
   folders: Folder[];
@@ -35,6 +37,9 @@ interface DashboardViewProps {
   onExportStandaloneHtml: () => void;
   onOpenShortcuts: () => void;
   onOpenSync?: () => void;
+  localDirName?: string | null;
+  onSelectLocalFolder?: () => void;
+  onShowToast?: (msg: string) => void;
 }
 
 function formatDateTime(timestamp: number): string {
@@ -71,11 +76,41 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   onImportAudio,
   onOpenShortcuts,
   onOpenSync,
+  localDirName,
+  onSelectLocalFolder,
+  onShowToast,
 }) => {
   const [isCreatingFolder, setIsCreatingFolder] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
   const [newFolderColor, setNewFolderColor] = useState('#10B981');
   const [folderSearchQuery, setFolderSearchQuery] = useState('');
+
+  const [internalLocalDirName, setInternalLocalDirName] = useState<string | null>(null);
+  const isFsSupported = fileSystemService.isSupported();
+
+  useEffect(() => {
+    if (isFsSupported) {
+      fileSystemService.getStoredHandle().then((handle) => {
+        if (handle) {
+          setInternalLocalDirName(handle.name);
+        }
+      });
+    }
+  }, [isFsSupported]);
+
+  const activeLocalDirName = localDirName !== undefined ? localDirName : internalLocalDirName;
+
+  const handleSelectFolderClick = async () => {
+    if (onSelectLocalFolder) {
+      onSelectLocalFolder();
+    } else {
+      const handle = await fileSystemService.selectDirectory();
+      if (handle) {
+        setInternalLocalDirName(handle.name);
+        onShowToast?.('Local save directory configured!');
+      }
+    }
+  };
 
   const fileUploadInputRef = React.useRef<HTMLInputElement | null>(null);
 
@@ -299,6 +334,36 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               </button>
             )}
 
+            {/* Local Folder Auto-Save Button (Chrome/Edge File System Access API) */}
+            {isFsSupported ? (
+              <button
+                onClick={handleSelectFolderClick}
+                title={
+                  activeLocalDirName
+                    ? `Recordings auto-save to /${activeLocalDirName}. Click to change folder.`
+                    : 'Choose a computer folder to auto-save recordings to disk (File System Access API)'
+                }
+                className={`py-2 px-3 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs border ${
+                  activeLocalDirName
+                    ? 'bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/60 dark:hover:bg-amber-900/60 border-amber-300 dark:border-amber-800/80 text-amber-900 dark:text-amber-200'
+                    : 'bg-white dark:bg-stone-900 border-[#e8e4dc] dark:border-stone-700 hover:bg-[#f7f5f0] dark:hover:bg-stone-800 text-stone-800 dark:text-stone-200'
+                }`}
+              >
+                <HardDrive className={`w-3.5 h-3.5 ${activeLocalDirName ? 'text-amber-600 dark:text-amber-400' : 'text-indigo-600 dark:text-indigo-400'}`} />
+                <span className="hidden sm:inline">
+                  {activeLocalDirName ? `📁 /${activeLocalDirName}` : 'Set Local Folder'}
+                </span>
+              </button>
+            ) : (
+              <div
+                title="Direct local folder writing requires Chrome, Edge, or Opera (File System Access API)"
+                className="py-2 px-2.5 bg-stone-100 dark:bg-stone-800/60 border border-stone-200 dark:border-stone-800 text-stone-400 dark:text-stone-500 rounded-xl text-xs font-medium flex items-center gap-1.5 cursor-not-allowed select-none opacity-80"
+              >
+                <HardDrive className="w-3.5 h-3.5" />
+                <span className="hidden lg:inline">Local Folder (Chrome/Edge only)</span>
+              </div>
+            )}
+
             <button
               onClick={() => fileUploadInputRef.current?.click()}
               className="py-2 px-3.5 bg-white dark:bg-stone-900 border border-[#e8e4dc] dark:border-stone-700 hover:bg-[#f7f5f0] dark:hover:bg-stone-800 text-stone-800 dark:text-stone-200 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs"
@@ -456,6 +521,36 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             className="hidden"
             onChange={handleUploadAudioChange}
           />
+
+          {/* Local Folder Auto-Save Button (Chrome/Edge File System Access API) */}
+          {isFsSupported ? (
+            <button
+              onClick={handleSelectFolderClick}
+              title={
+                activeLocalDirName
+                  ? `Recordings auto-save directly to local folder /${activeLocalDirName}. Click to change folder.`
+                  : 'Choose a computer folder to auto-save recordings to disk (File System Access API)'
+              }
+              className={`py-2 px-3.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs border ${
+                activeLocalDirName
+                  ? 'bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/60 dark:hover:bg-amber-900/60 border-amber-300 dark:border-amber-800/80 text-amber-900 dark:text-amber-200'
+                  : 'bg-white dark:bg-stone-900 border-[#e8e4dc] dark:border-stone-700 hover:bg-[#f7f5f0] dark:hover:bg-stone-800 text-stone-800 dark:text-stone-200'
+              }`}
+            >
+              <HardDrive className={`w-3.5 h-3.5 ${activeLocalDirName ? 'text-amber-600 dark:text-amber-400' : 'text-indigo-600 dark:text-indigo-400'}`} />
+              <span>
+                {activeLocalDirName ? `📁 Saving to: /${activeLocalDirName}` : 'Set Local Folder'}
+              </span>
+            </button>
+          ) : (
+            <div
+              title="Direct local folder writing requires Chrome, Edge, or Opera (File System Access API)"
+              className="py-2 px-3 bg-stone-100 dark:bg-stone-800/60 border border-stone-200 dark:border-stone-800 text-stone-400 dark:text-stone-500 rounded-xl text-xs font-medium flex items-center gap-1.5 cursor-not-allowed select-none opacity-80"
+            >
+              <HardDrive className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Local Folder (Chrome/Edge only)</span>
+            </div>
+          )}
 
           <button
             onClick={() => fileUploadInputRef.current?.click()}
