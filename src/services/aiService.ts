@@ -1,5 +1,6 @@
 // src/services/aiService.ts - Abstractive Synthesis & Multi-Template AI Extraction Engine for Pinpoint Audio
 import { GoogleGenAI } from '@google/genai';
+import { TranscriptionChunk } from '../types';
 
 export interface KeyPointItem {
   title: string; // Concise, descriptive headline (e.g. "Cognitive Load in Audio Processing")
@@ -690,5 +691,119 @@ export const aiService = new AIService();
 
 export async function extractKeyInsights(transcript: string, customPrompt?: string): Promise<ExtractionResult> {
   return aiService.extractKeyInsights(transcript, customPrompt);
+}
+
+/**
+ * Intelligent local speaker diarization heuristics when offline or without Gemini API key.
+ * Detects pauses, question-answer turns, and conversational discourse markers.
+ */
+export function diarizeTranscriptLocally(chunks: TranscriptionChunk[]): TranscriptionChunk[] {
+  if (!chunks || chunks.length === 0) return [];
+  if (chunks.length === 1) {
+    return [{ ...chunks[0], speaker: chunks[0].speaker || 'Speaker 1' }];
+  }
+
+  let currentSpeakerIdx = 0;
+  const speakerNames = ['Speaker 1', 'Speaker 2', 'Speaker 3'];
+
+  return chunks.map((chunk, idx) => {
+    if (idx > 0) {
+      const prevChunk = chunks[idx - 1];
+      const prevText = prevChunk.text.trim();
+      const curText = chunk.text.trim();
+
+      const pauseGap = chunk.timestamp[0] - prevChunk.timestamp[1];
+
+      // Turn cues
+      const prevHadQuestion = prevText.endsWith('?') || /\b(what|why|how|who|where|when|could you|can you|did you)\b/i.test(prevText);
+      const isConversationalTurn = /^(yes|no|yeah|yep|nope|sure|right|exactly|well|i agree|actually|thank you|thanks|good point)\b/i.test(curText);
+      const isAudiblePause = pauseGap > 2.0;
+
+      if ((prevHadQuestion && isConversationalTurn) || isAudiblePause || (prevHadQuestion && pauseGap > 0.8)) {
+        // Switch speaker
+        currentSpeakerIdx = (currentSpeakerIdx + 1) % 2; // alternate between Speaker 1 and Speaker 2
+      }
+    }
+
+    return {
+      ...chunk,
+      speaker: chunk.speaker || speakerNames[currentSpeakerIdx],
+    };
+  });
+}
+
+/**
+ * AI-assisted speech diarization: attributes transcript chunks to distinct speakers
+ * ("Speaker 1", "Speaker 2", etc.) by analyzing conversational dynamics, Q&A pairs,
+ * and topic transitions.
+ */
+export async function diarizeTranscriptWithAI(
+  chunks: TranscriptionChunk[]
+): Promise<TranscriptionChunk[]> {
+  if (!chunks || chunks.length === 0) return [];
+
+  const inputLines = chunks
+    .map((c, idx) => `[ID:${idx}] [${Math.round(c.timestamp[0])}s-${Math.round(c.timestamp[1])}s] ${c.text}`)
+    .join('\n');
+
+  const prompt = `
+You are an expert dialogue editor specializing in speech diarization.
+
+Below is a sequential list of timestamped transcript chunks from an audio recording.
+Analyze the conversational dynamics, question-and-answer pairs, topic transitions, and tone to attribute each chunk to a distinct speaker ("Speaker 1", "Speaker 2", etc.).
+
+CRITICAL GUIDELINES:
+- Assign a speaker label to every chunk ID.
+- Maintain consistency: if Speaker 1 asks a question and another voice answers, that is Speaker 2.
+- Do NOT modify, delete, or reorder the chunk text or timestamps.
+- Return ONLY a raw JSON array matching this format:
+[
+  { "id": 0, "speaker": "Speaker 1" },
+  { "id": 1, "speaker": "Speaker 1" },
+  { "id": 2, "speaker": "Speaker 2" }
+]
+
+TRANSCRIPT CHUNKS:
+${inputLines}
+`;
+
+  // Check for API key
+  const envKey =
+    (typeof process !== 'undefined' && process.env?.GEMINI_API_KEY) ||
+    (typeof process !== 'undefined' && process.env?.VITE_GEMINI_API_KEY) ||
+    (import.meta as unknown as { env?: { VITE_GEMINI_API_KEY?: string } })?.env?.VITE_GEMINI_API_KEY ||
+    '';
+  const apiKey = envKey ? envKey.trim() : null;
+
+  if (apiKey) {
+    try {
+      const ai = new GoogleGenAI({ apiKey });
+      const response = await ai.models.generateContent({
+        model: 'gemini-3.8-flash',
+        contents: prompt,
+        config: {
+          systemInstruction:
+            'You are an expert speech diarization model. Attribute speakers consistently across dialogue turns. Return only a valid JSON array of objects with id and speaker.',
+          responseMimeType: 'application/json',
+        },
+      });
+
+      const rawResponse = response.text || '[]';
+      const cleanJson = rawResponse.trim().replace(/^```json/i, '').replace(/```$/, '').trim();
+      const assignments: Array<{ id: number; speaker: string }> = JSON.parse(cleanJson);
+
+      // Map speaker assignments back to original chunks
+      const speakerMap = new Map<number, string>(assignments.map((a) => [a.id, a.speaker]));
+      return chunks.map((chunk, idx) => ({
+        ...chunk,
+        speaker: speakerMap.get(idx) || chunk.speaker || 'Speaker 1',
+      }));
+    } catch (err) {
+      console.warn('Gemini diarization error, using intelligent local diarization heuristic:', err);
+    }
+  }
+
+  // Fallback: run local heuristic diarization
+  return diarizeTranscriptLocally(chunks);
 }
 

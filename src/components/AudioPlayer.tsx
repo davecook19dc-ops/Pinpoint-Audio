@@ -482,14 +482,18 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
         const currentChunks =
           liveChunksRef.current.length > 0 ? [...liveChunksRef.current] : undefined;
 
-        onAudioRecorded(
-          finalBlob,
-          recordedDuration,
-          fileName,
-          sessionToUpdate,
-          currentTranscript,
-          currentChunks
-        );
+        if (finalBlob.size > 0) {
+          onAudioRecorded(
+            finalBlob,
+            recordedDuration,
+            fileName,
+            sessionToUpdate,
+            currentTranscript,
+            currentChunks
+          );
+        } else {
+          console.error('Audio recording failed: recorded blob was empty.');
+        }
 
         if (useLiveTranscription && currentTranscript) {
           if (onShowToast) {
@@ -518,7 +522,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
       mediaRecorderRef.current = mediaRecorder;
       recordingStartTimeRef.current = Date.now();
       recordingSecondsRef.current = 0;
-      mediaRecorder.start(250); // Collect data chunks every 250ms
+      mediaRecorder.start(1000); // Collect data chunks every 1000ms
       setIsRecording(true);
       setIsRecordingPaused(false);
       setRecordingSeconds(0);
@@ -547,11 +551,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
               const startSec = Math.max(0, timestampSec - 3);
               const endSec = timestampSec;
               liveChunksRef.current.push({ timestamp: [startSec, endSec], text: finalText });
-
-              const sid = activeRecordingSessionIdRef.current || currentSession?.id;
-              if (sid && onSaveTranscript) {
-                onSaveTranscript(updated, liveChunksRef.current, sid);
-              }
+              // Atomic save happens on recorder.onstop alongside the final audio blob
             },
             onError: (err) => {
               console.warn('Live speech recognition warning:', err);
@@ -629,11 +629,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
             const startSec = Math.max(0, timestampSec - 3);
             const endSec = timestampSec;
             liveChunksRef.current.push({ timestamp: [startSec, endSec], text: finalText });
-
-            const sid = activeRecordingSessionIdRef.current || currentSession?.id;
-            if (sid && onSaveTranscript) {
-              onSaveTranscript(updated, liveChunksRef.current, sid);
-            }
+            // Atomic save happens on recorder.onstop alongside the final audio blob
           },
         },
         () => recordingSecondsRef.current || 0

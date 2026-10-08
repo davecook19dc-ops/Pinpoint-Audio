@@ -24,6 +24,11 @@ export interface SessionImage {
 export interface TranscriptionChunk {
   timestamp: [number, number]; // [startSec, endSec]
   text: string;
+  speaker?: string; // e.g. "Speaker 1", "Speaker 2", or a user-assigned name
+}
+
+export interface SpeakerMapping {
+  [originalId: string]: string; // e.g. { "Speaker 1": "Dr. Sarah", "Speaker 2": "Alex" }
 }
 
 export interface Session {
@@ -38,6 +43,7 @@ export interface Session {
   audioFileName?: string;
   transcript?: string;
   chunks?: TranscriptionChunk[];
+  speakerMapping?: SpeakerMapping;
   images?: SessionImage[];
   deletedAt?: number; // timestamp in ms when moved to bin (soft-deleted)
 }

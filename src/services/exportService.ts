@@ -1,6 +1,30 @@
-import { Note, Session } from '../types';
+import { Note, Session, TranscriptionChunk } from '../types';
 import { dbService } from './db';
 import { formatTime } from '../utils/audio';
+
+/**
+ * Formats transcript chunks with speaker labels and timestamps into standardized Markdown.
+ * e.g. **[Speaker 1] (01:24):** We noticed a significant improvement...
+ */
+export function formatTranscriptMarkdown(
+  chunks: TranscriptionChunk[],
+  speakerMapping?: Record<string, string>
+): string {
+  if (!chunks || chunks.length === 0) return '';
+  return chunks
+    .map((chunk) => {
+      const startSec = Array.isArray(chunk.timestamp) ? chunk.timestamp[0] : 0;
+      const originalSpeaker = chunk.speaker;
+      const speakerName = originalSpeaker
+        ? (speakerMapping?.[originalSpeaker] || originalSpeaker)
+        : null;
+      if (speakerName) {
+        return `**[${speakerName}] (${formatTime(startSec)}):** ${chunk.text.trim()}`;
+      }
+      return `**[${formatTime(startSec)}]** ${chunk.text.trim()}`;
+    })
+    .join('\n\n');
+}
 
 /**
  * Generates the raw Markdown string of session notes and transcript without triggering a download.
@@ -10,12 +34,14 @@ export function generateMarkdownString(session: Session, notes: Note[]): string 
   md += `**Date:** ${new Date(session.createdAt).toLocaleDateString()}\n\n`;
   if (notes.length > 0) {
     md += `## Notes\n\n`;
-    notes.forEach(n => {
+    notes.forEach((n) => {
       md += `- [${n.calloutType.toUpperCase()}] **${formatTime(n.timestamp)}**: ${n.content}\n`;
     });
     md += `\n`;
   }
-  if (session.transcript) {
+  if (session.chunks && session.chunks.length > 0) {
+    md += `## Transcript\n\n${formatTranscriptMarkdown(session.chunks, session.speakerMapping)}\n`;
+  } else if (session.transcript) {
     md += `## Transcript\n\n${session.transcript}\n`;
   }
   return md;
@@ -109,10 +135,7 @@ export function compileSessionToMarkdown(session: Session, notes: Note[] = []): 
   // 4. ## Full Transcript (loop through the transcript chunks, formatting timestamps as [MM:SS] Text)
   sections.push('## Full Transcript\n');
   if (session.chunks && session.chunks.length > 0) {
-    session.chunks.forEach((chunk) => {
-      const startSec = Array.isArray(chunk.timestamp) ? chunk.timestamp[0] : 0;
-      sections.push(`**[${formatTime(startSec)}]** ${chunk.text.trim()}\n`);
-    });
+    sections.push(`${formatTranscriptMarkdown(session.chunks, session.speakerMapping)}\n`);
   } else if (session.transcript && session.transcript.trim().length > 0) {
     sections.push(`${session.transcript.trim()}\n`);
   } else {

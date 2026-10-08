@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import {
   Search,
   Send,
@@ -24,13 +24,78 @@ import {
   ListTodo,
   Lightbulb,
   HelpCircle,
+  Users,
+  UserCheck,
+  Loader2,
+  Tag,
 } from 'lucide-react';
-import { CalloutType, Note, Session } from '../types';
+import { CalloutType, Note, Session, SpeakerMapping, TranscriptionChunk } from '../types';
 import { formatTime } from '../utils/audio';
 import { modifierKey } from '../utils/platform';
 import { CALLOUT_CONFIGS, CalloutTag } from './CalloutBadge';
 import { SlidesViewer } from './SlidesViewer';
 import { KeyPointsPanel } from './KeyPointsPanel';
+import { diarizeTranscriptWithAI } from '../services/aiService';
+import { formatTranscriptMarkdown } from '../services/exportService';
+
+export const SPEAKER_COLOR_MAP: Record<
+  string,
+  {
+    bg: string;
+    text: string;
+    border: string;
+    badgeBg: string;
+    dot: string;
+  }
+> = {
+  'Speaker 1': {
+    bg: 'bg-indigo-50/80 dark:bg-indigo-950/40',
+    text: 'text-indigo-700 dark:text-indigo-300',
+    border: 'border-indigo-200 dark:border-indigo-800',
+    badgeBg: 'bg-indigo-100 dark:bg-indigo-900/60 text-indigo-800 dark:text-indigo-200 border-indigo-300 dark:border-indigo-700',
+    dot: 'bg-indigo-500',
+  },
+  'Speaker 2': {
+    bg: 'bg-emerald-50/80 dark:bg-emerald-950/40',
+    text: 'text-emerald-700 dark:text-emerald-300',
+    border: 'border-emerald-200 dark:border-emerald-800',
+    badgeBg: 'bg-emerald-100 dark:bg-emerald-900/60 text-emerald-800 dark:text-emerald-200 border-emerald-300 dark:border-emerald-700',
+    dot: 'bg-emerald-500',
+  },
+  'Speaker 3': {
+    bg: 'bg-amber-50/80 dark:bg-amber-950/40',
+    text: 'text-amber-800 dark:text-amber-300',
+    border: 'border-amber-200 dark:border-amber-800',
+    badgeBg: 'bg-amber-100 dark:bg-amber-900/60 text-amber-900 dark:text-amber-200 border-amber-300 dark:border-amber-700',
+    dot: 'bg-amber-500',
+  },
+  'Speaker 4': {
+    bg: 'bg-purple-50/80 dark:bg-purple-950/40',
+    text: 'text-purple-700 dark:text-purple-300',
+    border: 'border-purple-200 dark:border-purple-800',
+    badgeBg: 'bg-purple-100 dark:bg-purple-900/60 text-purple-800 dark:text-purple-200 border-purple-300 dark:border-purple-700',
+    dot: 'bg-purple-500',
+  },
+  'Speaker 5': {
+    bg: 'bg-rose-50/80 dark:bg-rose-950/40',
+    text: 'text-rose-700 dark:text-rose-300',
+    border: 'border-rose-200 dark:border-rose-800',
+    badgeBg: 'bg-rose-100 dark:bg-rose-900/60 text-rose-800 dark:text-rose-200 border-rose-300 dark:border-rose-700',
+    dot: 'bg-rose-500',
+  },
+};
+
+export function getSpeakerStyle(speaker?: string) {
+  if (!speaker) return SPEAKER_COLOR_MAP['Speaker 1'];
+  if (SPEAKER_COLOR_MAP[speaker]) return SPEAKER_COLOR_MAP[speaker];
+  const keys = Object.keys(SPEAKER_COLOR_MAP);
+  let hash = 0;
+  for (let i = 0; i < speaker.length; i++) {
+    hash = (hash << 5) - hash + speaker.charCodeAt(i);
+  }
+  const colorKey = keys[Math.abs(hash) % keys.length];
+  return SPEAKER_COLOR_MAP[colorKey];
+}
 
 interface NotesFeedProps {
   currentSession: Session | null;
@@ -50,6 +115,7 @@ interface NotesFeedProps {
   onTranscribeAudio?: () => void;
   isTranscribing?: boolean;
   onSaveTranscript?: (transcript: string) => void;
+  onUpdateSession?: (session: Session) => void;
   onBackToRecording?: () => void;
   onUploadSlide?: (file: File, timestamp?: number) => void;
   onDeleteSlide?: (slideId: string) => void;
@@ -71,6 +137,8 @@ export const NotesFeed: React.FC<NotesFeedProps> = ({
   onResetQuickAdd,
   onTranscribeAudio,
   isTranscribing = false,
+  onSaveTranscript,
+  onUpdateSession,
   onBackToRecording,
   onUploadSlide,
   onDeleteSlide,
@@ -314,21 +382,143 @@ export const NotesFeed: React.FC<NotesFeedProps> = ({
     return <p className={`${textClass} whitespace-pre-wrap leading-relaxed`}>{elements}</p>;
   };
 
+  // Speaker diarization state
+  const [isDiarizing, setIsDiarizing] = useState(false);
+  const [diarizeToast, setDiarizeToast] = useState<string | null>(null);
+  const [renamingSpeakerId, setRenamingSpeakerId] = useState<string | null>(null);
+  const [renameSpeakerValue, setRenameSpeakerValue] = useState<string>('');
+
+  // Collect all unique speakers across current session chunks
+  const allKnownSpeakers = useMemo(() => {
+    const set = new Set<string>();
+    if (currentSession?.chunks) {
+      currentSession.chunks.forEach((c) => {
+        if (c.speaker) set.add(c.speaker);
+      });
+    }
+    if (set.size === 0) {
+      set.add('Speaker 1');
+      set.add('Speaker 2');
+    }
+    return Array.from(set);
+  }, [currentSession?.chunks]);
+
+  const handleFormatWithSpeakerLabels = async () => {
+    if (!currentSession) return;
+    if (isDiarizing) return;
+
+    let targetChunks: TranscriptionChunk[] = [];
+    if (currentSession.chunks && currentSession.chunks.length > 0) {
+      targetChunks = currentSession.chunks;
+    } else if (currentSession.transcript) {
+      const segments = getParsedTranscriptSegments(currentSession.transcript);
+      targetChunks = segments.map((seg) => ({
+        timestamp: [seg.timestamp, seg.timestamp + 3],
+        text: seg.text,
+        speaker: seg.speaker,
+      }));
+    }
+
+    if (targetChunks.length === 0) return;
+
+    setIsDiarizing(true);
+    try {
+      const labeledChunks = await diarizeTranscriptWithAI(targetChunks);
+      const updatedTranscript = formatTranscriptMarkdown(labeledChunks, currentSession.speakerMapping);
+
+      const updatedSession: Session = {
+        ...currentSession,
+        chunks: labeledChunks,
+        transcript: updatedTranscript || currentSession.transcript,
+        updatedAt: Date.now(),
+      };
+
+      if (onUpdateSession) {
+        onUpdateSession(updatedSession);
+      }
+      setDiarizeToast('Speaker labels assigned! Click any speaker to rename.');
+      setTimeout(() => setDiarizeToast(null), 3500);
+    } catch (err) {
+      console.error('Speaker diarization error:', err);
+    } finally {
+      setIsDiarizing(false);
+    }
+  };
+
+  const handleRenameSpeaker = (originalSpeakerId: string, newName: string) => {
+    if (!currentSession) return;
+    const cleanName = newName.trim();
+    if (!cleanName) {
+      setRenamingSpeakerId(null);
+      return;
+    }
+
+    const currentMapping = currentSession.speakerMapping || {};
+    const updatedMapping = {
+      ...currentMapping,
+      [originalSpeakerId]: cleanName,
+    };
+
+    const updatedTranscript = formatTranscriptMarkdown(currentSession.chunks || [], updatedMapping);
+
+    const updatedSession: Session = {
+      ...currentSession,
+      speakerMapping: updatedMapping,
+      transcript: updatedTranscript || currentSession.transcript,
+      updatedAt: Date.now(),
+    };
+
+    if (onUpdateSession) {
+      onUpdateSession(updatedSession);
+    }
+    setRenamingSpeakerId(null);
+    setRenameSpeakerValue('');
+  };
+
+  const handleChangeChunkSpeaker = (chunkIndex: number, newSpeaker: string) => {
+    if (!currentSession || !currentSession.chunks) return;
+    const updatedChunks = currentSession.chunks.map((c, idx) =>
+      idx === chunkIndex ? { ...c, speaker: newSpeaker } : c
+    );
+    const updatedTranscript = formatTranscriptMarkdown(updatedChunks, currentSession.speakerMapping);
+    const updatedSession: Session = {
+      ...currentSession,
+      chunks: updatedChunks,
+      transcript: updatedTranscript || currentSession.transcript,
+      updatedAt: Date.now(),
+    };
+    if (onUpdateSession) {
+      onUpdateSession(updatedSession);
+    }
+  };
+
   const handleCopyTranscript = () => {
-    if (!currentSession?.transcript) return;
-    navigator.clipboard.writeText(currentSession.transcript).then(() => {
+    if (!currentSession) return;
+    const contentToCopy =
+      currentSession.chunks && currentSession.chunks.length > 0
+        ? formatTranscriptMarkdown(currentSession.chunks, currentSession.speakerMapping)
+        : currentSession.transcript || '';
+
+    if (!contentToCopy) return;
+    navigator.clipboard.writeText(contentToCopy).then(() => {
       setHasCopiedTranscript(true);
       setTimeout(() => setHasCopiedTranscript(false), 2000);
     });
   };
 
   const handleDownloadTranscript = () => {
-    if (!currentSession?.transcript) return;
-    const blob = new Blob([currentSession.transcript], { type: 'text/plain;charset=utf-8' });
+    if (!currentSession) return;
+    const contentToDownload =
+      currentSession.chunks && currentSession.chunks.length > 0
+        ? formatTranscriptMarkdown(currentSession.chunks, currentSession.speakerMapping)
+        : currentSession.transcript || '';
+
+    if (!contentToDownload) return;
+    const blob = new Blob([contentToDownload], { type: 'text/markdown;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${currentSession.title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}_transcript.txt`;
+    a.download = `${currentSession.title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}_transcript.md`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -418,12 +608,28 @@ export const NotesFeed: React.FC<NotesFeedProps> = ({
     text: string;
     timestamp: number;
     timeLabel?: string;
+    speaker?: string;
   }
 
   const getParsedTranscriptSegments = (transcript: string): ParsedSegment[] => {
     if (!transcript) return [];
     const rawLines = transcript.split(/\r?\n+/).filter((l) => l.trim().length > 0);
     return rawLines.map((line, idx) => {
+      // Check for markdown speaker format: **[Speaker 1] (01:24):** Text
+      const speakerMdMatch = line.match(/^\*\*\[(.*?)\](?:\s*\((.*?)\))?:\*\*\s*(.*)$/);
+      if (speakerMdMatch) {
+        const timeStr = speakerMdMatch[2] || '00:00';
+        return {
+          id: `seg-${idx}`,
+          raw: line,
+          speaker: speakerMdMatch[1],
+          timeLabel: timeStr,
+          timestamp: parseTimestampToSeconds(timeStr),
+          text: speakerMdMatch[3] || line,
+        };
+      }
+
+      // Check for [MM:SS - MM:SS] format
       const match = line.match(/^\[(\d{1,2}:\d{2}(?::\d{2})?)(?:\s*-\s*\d{1,2}:\d{2}(?::\d{2})?)?\]\s*(.*)$/);
       if (match) {
         return {
@@ -787,10 +993,31 @@ export const NotesFeed: React.FC<NotesFeedProps> = ({
               </div>
 
               {currentSession?.transcript && (
-                <div className="flex items-center gap-1.5 shrink-0">
+                <div className="flex items-center gap-1.5 shrink-0 flex-wrap justify-end">
+                  {/* Format with Speaker Labels Button */}
+                  <button
+                    onClick={handleFormatWithSpeakerLabels}
+                    disabled={isDiarizing || (!currentSession.chunks?.length && !currentSession.transcript)}
+                    title="Format transcript with AI-attributed speaker labels (Speaker 1, Speaker 2...)"
+                    className="px-2.5 py-1 rounded-xl text-xs font-semibold bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 transition-colors cursor-pointer flex items-center gap-1.5 shadow-2xs disabled:opacity-50"
+                  >
+                    {isDiarizing ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-600 dark:text-indigo-400" />
+                        <span>Labeling...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Users className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                        <span className="hidden sm:inline">Format with Speaker Labels</span>
+                        <span className="sm:hidden">Speakers</span>
+                      </>
+                    )}
+                  </button>
+
                   <button
                     onClick={handleCopyTranscript}
-                    title="Copy full transcript"
+                    title="Copy full transcript with speaker labels"
                     className="px-2.5 py-1 rounded-xl text-xs font-semibold bg-white dark:bg-stone-800 border border-[#e8e4dc] dark:border-stone-700 text-stone-800 dark:text-stone-200 hover:bg-[#f0ece4] transition-colors cursor-pointer flex items-center gap-1 shadow-2xs"
                   >
                     {hasCopiedTranscript ? (
@@ -810,7 +1037,7 @@ export const NotesFeed: React.FC<NotesFeedProps> = ({
 
                   <button
                     onClick={handleDownloadTranscript}
-                    title="Download transcript (.txt)"
+                    title="Download transcript (.md)"
                     className="p-1.5 rounded-xl bg-white dark:bg-stone-800 border border-[#e8e4dc] dark:border-stone-700 text-stone-700 hover:text-stone-900 dark:text-stone-300 hover:bg-[#f0ece4] transition-colors cursor-pointer shadow-2xs"
                   >
                     <Download className="w-3.5 h-3.5" />
@@ -839,12 +1066,106 @@ export const NotesFeed: React.FC<NotesFeedProps> = ({
                 onKeyUp={handleTranscriptSelectionChange}
                 className="flex-1 overflow-y-auto pr-2 space-y-3 min-h-0 relative select-text"
               >
+                {/* Diarization feedback toast */}
+                {diarizeToast && (
+                  <div className="p-2.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-xs text-emerald-900 dark:text-emerald-200 flex items-center justify-between gap-2 shadow-2xs animate-in fade-in duration-150">
+                    <div className="flex items-center gap-1.5">
+                      <UserCheck className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                      <span>{diarizeToast}</span>
+                    </div>
+                    <button
+                      onClick={() => setDiarizeToast(null)}
+                      className="p-1 hover:bg-emerald-100 dark:hover:bg-emerald-900 rounded cursor-pointer"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
+                )}
+
+                {/* Speaker Legend & Quick Renaming Bar */}
+                {allKnownSpeakers.length > 0 && currentSession.chunks?.some((c) => c.speaker) && (
+                  <div className="p-2.5 rounded-xl bg-[#faf8f5]/80 dark:bg-stone-900/60 border border-[#e8e4dc] dark:border-stone-800 shadow-2xs flex flex-wrap items-center justify-between gap-2 text-xs">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="text-[11px] font-bold text-stone-500 uppercase tracking-wider flex items-center gap-1">
+                        <Users className="w-3.5 h-3.5 text-stone-400" />
+                        Speakers:
+                      </span>
+                      {allKnownSpeakers.map((origSpeaker) => {
+                        const displayName = currentSession.speakerMapping?.[origSpeaker] || origSpeaker;
+                        const style = getSpeakerStyle(origSpeaker);
+                        const isBeingRenamed = renamingSpeakerId === origSpeaker;
+
+                        return isBeingRenamed ? (
+                          <div
+                            key={origSpeaker}
+                            className="inline-flex items-center gap-1 bg-white dark:bg-stone-800 border border-indigo-500 rounded-lg p-0.5 shadow-2xs"
+                          >
+                            <input
+                              autoFocus
+                              type="text"
+                              value={renameSpeakerValue}
+                              onChange={(e) => setRenameSpeakerValue(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  e.preventDefault();
+                                  handleRenameSpeaker(origSpeaker, renameSpeakerValue);
+                                } else if (e.key === 'Escape') {
+                                  setRenamingSpeakerId(null);
+                                }
+                              }}
+                              className="text-xs px-2 py-0.5 w-28 bg-transparent text-stone-900 dark:text-stone-100 font-semibold focus:outline-hidden"
+                              placeholder="Name..."
+                            />
+                            <button
+                              type="button"
+                              onClick={() => handleRenameSpeaker(origSpeaker, renameSpeakerValue)}
+                              className="p-1 hover:bg-emerald-100 dark:hover:bg-emerald-950 text-emerald-700 dark:text-emerald-400 rounded transition-colors cursor-pointer"
+                              title="Save"
+                            >
+                              <Check className="w-3 h-3" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setRenamingSpeakerId(null)}
+                              className="p-1 hover:bg-stone-100 dark:hover:bg-stone-700 text-stone-500 rounded transition-colors cursor-pointer"
+                              title="Cancel"
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            key={origSpeaker}
+                            type="button"
+                            onClick={() => {
+                              setRenamingSpeakerId(origSpeaker);
+                              setRenameSpeakerValue(displayName);
+                            }}
+                            title={`Click to rename ${displayName} across all transcript lines`}
+                            className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-lg border text-xs font-semibold shadow-2xs transition-all hover:scale-105 cursor-pointer ${style.badgeBg}`}
+                          >
+                            <span className={`w-1.5 h-1.5 rounded-full ${style.dot}`} />
+                            <span>{displayName}</span>
+                            {displayName !== origSpeaker && (
+                              <span className="text-[10px] opacity-60">({origSpeaker})</span>
+                            )}
+                            <Edit2 className="w-2.5 h-2.5 opacity-50 hover:opacity-100 ml-0.5" />
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <span className="text-[10px] text-stone-400 hidden sm:inline">
+                      Click speaker pill to rename
+                    </span>
+                  </div>
+                )}
+
                 {/* Tip Header Banner */}
                 <div className="p-2.5 rounded-xl bg-indigo-50/80 dark:bg-indigo-950/30 border border-indigo-200/80 dark:border-indigo-800/60 text-xs text-indigo-900 dark:text-indigo-200 flex items-center justify-between gap-2 shadow-2xs select-none">
                   <div className="flex items-center gap-1.5">
                     <span className="text-sm">✨</span>
                     <span>
-                      <strong className="font-semibold">Click-to-Transfer:</strong> Highlight any text or click the quick tags next to sentences to send snippets directly to your Notes.
+                      <strong className="font-semibold">Interactive Transcript:</strong> Click any speaker badge to rename. Highlight text or click tags to transfer snippets directly to your Notes.
                     </span>
                   </div>
                   {transferToast && (
@@ -861,22 +1182,33 @@ export const NotesFeed: React.FC<NotesFeedProps> = ({
                       <TranscriptChunkItem
                         key={`chunk-${idx}`}
                         chunk={chunk}
+                        chunkIndex={idx}
                         currentTime={currentTime}
                         onSeek={onSeek}
                         onTransfer={handleTransferSnippet}
+                        speakerMapping={currentSession.speakerMapping}
+                        onRenameSpeaker={handleRenameSpeaker}
+                        onChangeSpeaker={handleChangeChunkSpeaker}
+                        allKnownSpeakers={allKnownSpeakers}
                       />
                     ))
                   ) : (
-                    getParsedTranscriptSegments(currentSession.transcript).map((seg) => (
+                    getParsedTranscriptSegments(currentSession.transcript).map((seg, idx) => (
                       <TranscriptChunkItem
                         key={seg.id}
                         chunk={{
                           timestamp: [seg.timestamp, seg.timestamp + 2],
                           text: seg.text,
+                          speaker: seg.speaker,
                         }}
+                        chunkIndex={idx}
                         currentTime={currentTime}
                         onSeek={onSeek}
                         onTransfer={handleTransferSnippet}
+                        speakerMapping={currentSession.speakerMapping}
+                        onRenameSpeaker={handleRenameSpeaker}
+                        onChangeSpeaker={handleChangeChunkSpeaker}
+                        allKnownSpeakers={allKnownSpeakers}
                       />
                     ))
                   )}
@@ -1263,27 +1595,60 @@ export const NotesFeed: React.FC<NotesFeedProps> = ({
 };
 
 interface TranscriptChunkItemProps {
-  chunk: { timestamp: [number, number]; text: string };
+  chunk: TranscriptionChunk;
+  chunkIndex: number;
   currentTime: number;
   onSeek: (time: number) => void;
   onTransfer: (text: string, timestamp: number, type: CalloutType) => void;
+  speakerMapping?: SpeakerMapping;
+  onRenameSpeaker?: (originalSpeaker: string, newName: string) => void;
+  onChangeSpeaker?: (chunkIndex: number, newSpeaker: string) => void;
+  allKnownSpeakers?: string[];
 }
 
 const TranscriptChunkItem: React.FC<TranscriptChunkItemProps> = ({
   chunk,
+  chunkIndex,
   currentTime,
   onSeek,
   onTransfer,
+  speakerMapping,
+  onRenameSpeaker,
+  onChangeSpeaker,
+  allKnownSpeakers = ['Speaker 1', 'Speaker 2'],
 }) => {
   const [start, end] = chunk.timestamp;
   const isActive = currentTime >= start && currentTime <= (end ?? start + 2);
   const activeRef = useRef<HTMLDivElement | null>(null);
+
+  const [isEditingSpeaker, setIsEditingSpeaker] = useState(false);
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+
+  const originalSpeaker = chunk.speaker;
+  const displayName = (originalSpeaker && speakerMapping?.[originalSpeaker]) || originalSpeaker || '';
+  const [editSpeakerName, setEditSpeakerName] = useState(displayName);
+
+  // Sync edit field if external displayName changes
+  useEffect(() => {
+    setEditSpeakerName(displayName);
+  }, [displayName]);
+
+  const speakerStyle = originalSpeaker ? getSpeakerStyle(originalSpeaker) : null;
 
   useEffect(() => {
     if (isActive && activeRef.current) {
       activeRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
   }, [isActive]);
+
+  const handleSaveInlineSpeaker = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const clean = editSpeakerName.trim();
+    if (clean && onRenameSpeaker && originalSpeaker) {
+      onRenameSpeaker(originalSpeaker, clean);
+    }
+    setIsEditingSpeaker(false);
+  };
 
   return (
     <div
@@ -1295,67 +1660,213 @@ const TranscriptChunkItem: React.FC<TranscriptChunkItemProps> = ({
           : 'bg-[#faf8f5] dark:bg-stone-900/60 hover:bg-white dark:hover:bg-stone-900 border-[#e8e4dc] dark:border-stone-800 hover:border-indigo-200 dark:hover:border-indigo-900/80'
       }`}
     >
-      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-2">
-        <div className="flex-1 min-w-0 flex items-start gap-2">
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              onSeek(start);
-            }}
-            title={`Jump audio to ${formatTime(start)}`}
-            className="mt-0.5 inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-stone-900 dark:bg-stone-100 text-white dark:text-stone-900 font-mono text-[11px] font-semibold hover:bg-indigo-600 hover:text-white transition-colors cursor-pointer shrink-0 shadow-2xs"
+      <div className="flex flex-col gap-2">
+        {/* Top bar: Timestamp, Speaker Badge & Quick Transfer Actions */}
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* Timestamp Jump Button */}
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onSeek(start);
+              }}
+              title={`Jump audio to ${formatTime(start)}`}
+              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-stone-900 dark:bg-stone-100 text-white dark:text-stone-900 font-mono text-[11px] font-semibold hover:bg-indigo-600 hover:text-white transition-colors cursor-pointer shrink-0 shadow-2xs"
+            >
+              <Play className="w-2.5 h-2.5 fill-current" />
+              <span>[{formatTime(start)}]</span>
+            </button>
+
+            {/* Speaker Attribution & Inline Renaming */}
+            {isEditingSpeaker ? (
+              <div
+                className="inline-flex items-center gap-1 bg-white dark:bg-stone-800 border border-indigo-400 dark:border-indigo-600 rounded-lg p-0.5 shadow-xs"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <input
+                  autoFocus
+                  type="text"
+                  value={editSpeakerName}
+                  onChange={(e) => setEditSpeakerName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleSaveInlineSpeaker();
+                    } else if (e.key === 'Escape') {
+                      setIsEditingSpeaker(false);
+                      setEditSpeakerName(displayName);
+                    }
+                  }}
+                  className="text-xs px-2 py-0.5 w-28 bg-transparent text-stone-900 dark:text-stone-100 font-semibold focus:outline-hidden"
+                  placeholder="Speaker name..."
+                />
+                <button
+                  type="button"
+                  onClick={handleSaveInlineSpeaker}
+                  className="p-1 hover:bg-emerald-100 dark:hover:bg-emerald-950 text-emerald-700 dark:text-emerald-400 rounded transition-colors cursor-pointer"
+                  title="Save name"
+                >
+                  <Check className="w-3 h-3" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsEditingSpeaker(false);
+                    setEditSpeakerName(displayName);
+                  }}
+                  className="p-1 hover:bg-stone-100 dark:hover:bg-stone-700 text-stone-500 rounded transition-colors cursor-pointer"
+                  title="Cancel"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </div>
+            ) : originalSpeaker ? (
+              <div className="relative inline-flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                <div
+                  className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-lg border text-xs font-semibold shadow-2xs transition-all ${
+                    speakerStyle?.badgeBg || 'bg-stone-100 dark:bg-stone-800 text-stone-800 border-stone-200'
+                  }`}
+                >
+                  <span className={`w-1.5 h-1.5 rounded-full ${speakerStyle?.dot || 'bg-stone-400'}`} />
+                  <span
+                    onClick={() => {
+                      setEditSpeakerName(displayName);
+                      setIsEditingSpeaker(true);
+                    }}
+                    title="Click to rename speaker"
+                    className="cursor-pointer hover:underline"
+                  >
+                    {displayName}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditSpeakerName(displayName);
+                      setIsEditingSpeaker(true);
+                    }}
+                    title={`Rename ${displayName}`}
+                    className="p-0.5 hover:opacity-100 opacity-60 rounded transition-opacity cursor-pointer"
+                  >
+                    <Edit2 className="w-2.5 h-2.5" />
+                  </button>
+
+                  {/* Switch speaker trigger */}
+                  <button
+                    type="button"
+                    onClick={() => setIsDropdownOpen((v) => !v)}
+                    title="Change speaker for this line"
+                    className="p-0.5 hover:opacity-100 opacity-60 rounded transition-opacity cursor-pointer text-[9px] font-mono ml-0.5"
+                  >
+                    ▾
+                  </button>
+                </div>
+
+                {/* Speaker Switch Dropdown */}
+                {isDropdownOpen && (
+                  <div className="absolute top-full left-0 mt-1 z-30 bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-700 rounded-xl shadow-xl py-1 min-w-[140px] text-xs">
+                    <div className="px-2 py-1 text-[10px] font-bold text-stone-400 uppercase tracking-wider">
+                      Assign Speaker
+                    </div>
+                    {allKnownSpeakers.map((spk) => {
+                      const label = speakerMapping?.[spk] || spk;
+                      return (
+                        <button
+                          key={spk}
+                          type="button"
+                          onClick={() => {
+                            onChangeSpeaker?.(chunkIndex, spk);
+                            setIsDropdownOpen(false);
+                          }}
+                          className={`w-full text-left px-2.5 py-1.5 flex items-center justify-between hover:bg-stone-100 dark:hover:bg-stone-800 transition-colors cursor-pointer ${
+                            originalSpeaker === spk ? 'font-bold text-indigo-600 dark:text-indigo-400' : ''
+                          }`}
+                        >
+                          <span>{label}</span>
+                          {originalSpeaker === spk && <Check className="w-3 h-3" />}
+                        </button>
+                      );
+                    })}
+                    <div className="border-t border-stone-100 dark:border-stone-800 my-1" />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const nextIndex = allKnownSpeakers.length + 1;
+                        const newSpk = `Speaker ${nextIndex}`;
+                        onChangeSpeaker?.(chunkIndex, newSpk);
+                        setIsDropdownOpen(false);
+                      }}
+                      className="w-full text-left px-2.5 py-1.5 text-[11px] text-indigo-600 dark:text-indigo-400 font-semibold hover:bg-indigo-50 dark:hover:bg-indigo-950/40 cursor-pointer"
+                    >
+                      + Add Speaker {allKnownSpeakers.length + 1}
+                    </button>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onChangeSpeaker?.(chunkIndex, 'Speaker 1');
+                }}
+                title="Attribute this line to Speaker 1"
+                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md border border-dashed border-stone-300 dark:border-stone-700 text-[10px] text-stone-500 hover:text-stone-900 dark:hover:text-stone-200 hover:border-stone-400 font-semibold cursor-pointer select-none"
+              >
+                <Plus className="w-2.5 h-2.5" />
+                <span>Speaker</span>
+              </button>
+            )}
+          </div>
+
+          {/* Quick Transfer Actions */}
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="flex items-center gap-1 shrink-0 opacity-80 sm:opacity-0 group-hover:opacity-100 transition-opacity select-none"
           >
-            <Play className="w-2.5 h-2.5 fill-current" />
-            <span>[{formatTime(start)}]</span>
-          </button>
-          <p className="text-sm text-stone-900 dark:text-stone-100 leading-relaxed font-normal whitespace-pre-wrap select-text">
-            {chunk.text.trim()}
-          </p>
+            <button
+              type="button"
+              onClick={() => onTransfer(chunk.text, start, 'note')}
+              title="Add entire chunk as Note"
+              className="px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-[#faf8f5] hover:bg-stone-200 dark:bg-stone-800 dark:hover:bg-stone-700 text-stone-800 dark:text-stone-200 border border-stone-300 dark:border-stone-700 transition-colors shadow-2xs flex items-center gap-0.5 cursor-pointer active:scale-95"
+            >
+              <span>📝</span>
+              <span>Note</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => onTransfer(chunk.text, start, 'key_point')}
+              title="Add entire chunk as Key Point"
+              className="px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-[#fef3c7] hover:bg-[#fde68a] dark:bg-amber-950/70 dark:hover:bg-amber-900 text-amber-950 dark:text-amber-200 border border-amber-300 dark:border-amber-800 transition-colors shadow-2xs flex items-center gap-0.5 cursor-pointer active:scale-95"
+            >
+              <span>💡</span>
+              <span>Key</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => onTransfer(chunk.text, start, 'task')}
+              title="Add entire chunk as Task"
+              className="px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-[#dcfce7] hover:bg-[#bbf7d0] dark:bg-emerald-950/70 dark:hover:bg-emerald-900 text-emerald-950 dark:text-emerald-200 border border-emerald-300 dark:border-emerald-800 transition-colors shadow-2xs flex items-center gap-0.5 cursor-pointer active:scale-95"
+            >
+              <span>✅</span>
+              <span>Task</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => onTransfer(chunk.text, start, 'question_to_ask')}
+              title="Add entire chunk as Question"
+              className="px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-[#f3e8ff] hover:bg-[#e9d5ff] dark:bg-purple-950/70 dark:hover:bg-purple-900 text-purple-950 dark:text-purple-200 border border-purple-300 dark:border-purple-800 transition-colors shadow-2xs flex items-center gap-0.5 cursor-pointer active:scale-95"
+            >
+              <span>❓</span>
+              <span>Q</span>
+            </button>
+          </div>
         </div>
 
-        {/* Quick Transfer Actions */}
-        <div
-          onClick={(e) => e.stopPropagation()}
-          className="flex items-center gap-1 shrink-0 pt-1 sm:pt-0 opacity-80 sm:opacity-0 group-hover:opacity-100 transition-opacity select-none"
-        >
-          <button
-            type="button"
-            onClick={() => onTransfer(chunk.text, start, 'note')}
-            title="Add entire chunk as Note"
-            className="px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-[#faf8f5] hover:bg-stone-200 dark:bg-stone-800 dark:hover:bg-stone-700 text-stone-800 dark:text-stone-200 border border-stone-300 dark:border-stone-700 transition-colors shadow-2xs flex items-center gap-0.5 cursor-pointer active:scale-95"
-          >
-            <span>📝</span>
-            <span>Note</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => onTransfer(chunk.text, start, 'key_point')}
-            title="Add entire chunk as Key Point"
-            className="px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-[#fef3c7] hover:bg-[#fde68a] dark:bg-amber-950/70 dark:hover:bg-amber-900 text-amber-950 dark:text-amber-200 border border-amber-300 dark:border-amber-800 transition-colors shadow-2xs flex items-center gap-0.5 cursor-pointer active:scale-95"
-          >
-            <span>💡</span>
-            <span>Key</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => onTransfer(chunk.text, start, 'task')}
-            title="Add entire chunk as Task"
-            className="px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-[#dcfce7] hover:bg-[#bbf7d0] dark:bg-emerald-950/70 dark:hover:bg-emerald-900 text-emerald-950 dark:text-emerald-200 border border-emerald-300 dark:border-emerald-800 transition-colors shadow-2xs flex items-center gap-0.5 cursor-pointer active:scale-95"
-          >
-            <span>✅</span>
-            <span>Task</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => onTransfer(chunk.text, start, 'question_to_ask')}
-            title="Add entire chunk as Question"
-            className="px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-[#f3e8ff] hover:bg-[#e9d5ff] dark:bg-purple-950/70 dark:hover:bg-purple-900 text-purple-950 dark:text-purple-200 border border-purple-300 dark:border-purple-800 transition-colors shadow-2xs flex items-center gap-0.5 cursor-pointer active:scale-95"
-          >
-            <span>❓</span>
-            <span>Q</span>
-          </button>
-        </div>
+        {/* Chunk Spoken Text */}
+        <p className="text-sm text-stone-900 dark:text-stone-100 leading-relaxed font-normal whitespace-pre-wrap select-text pl-0.5">
+          {chunk.text.trim()}
+        </p>
       </div>
     </div>
   );

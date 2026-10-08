@@ -515,8 +515,8 @@ export default function App() {
           audioBlob: blob,
           audioMimeType: blob.type,
           audioFileName: fileName,
-          ...(transcript ? { transcript } : {}),
-          ...(chunks && chunks.length > 0 ? { chunks } : {}),
+          transcript: transcript || existingSession.transcript,
+          chunks: chunks && chunks.length > 0 ? chunks : existingSession.chunks,
           updatedAt: Date.now(),
         };
 
@@ -980,6 +980,13 @@ export default function App() {
       updatedAt: Date.now(),
     };
 
+    await dbService.saveSession(updatedSession);
+    setSessions((prev) =>
+      prev.map((s) => (s.id === updatedSession.id ? updatedSession : s))
+    );
+  };
+
+  const handleUpdateSession = async (updatedSession: Session) => {
     await dbService.saveSession(updatedSession);
     setSessions((prev) =>
       prev.map((s) => (s.id === updatedSession.id ? updatedSession : s))
@@ -1875,6 +1882,7 @@ export default function App() {
               onTranscribeAudio={handleTranscribeAudio}
               isTranscribing={isTranscribing}
               onSaveTranscript={handleSaveTranscript}
+              onUpdateSession={handleUpdateSession}
               onBackToRecording={() => setShowMobileNotes(false)}
               onUploadSlide={handleUploadSlide}
               onDeleteSlide={handleDeleteSlide}
