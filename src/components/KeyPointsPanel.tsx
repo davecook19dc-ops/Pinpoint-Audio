@@ -60,6 +60,7 @@ export const KeyPointsPanel: React.FC<KeyPointsPanelProps> = ({
     icon: React.ElementType;
     badge: string;
   }[] = [
+    { id: 'keypoints', label: 'Key Insights', icon: Award, badge: 'Abstractive Synthesis' },
     { id: 'lecture', label: 'Lecture', icon: BookOpen, badge: 'Study Notes & Concepts' },
     { id: 'meeting', label: 'Meeting', icon: Users, badge: 'Decisions & Tasks' },
     { id: 'flashcards', label: 'Flashcards', icon: Layers, badge: 'Q&A Cards' },
@@ -217,6 +218,147 @@ export const KeyPointsPanel: React.FC<KeyPointsPanelProps> = ({
             {/* Results Renderers */}
             {result && !loading && (
               <div className="space-y-3 pt-2">
+                {/* KEY INSIGHTS / ABSTRACTIVE SYNTHESIS */}
+                {result.template === 'keypoints' && (
+                  <div className="space-y-3">
+                    {/* Executive Overview */}
+                    <div className="p-3.5 rounded-xl border border-indigo-100 dark:border-indigo-950/80 bg-indigo-50/40 dark:bg-indigo-950/20 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-bold text-indigo-800 dark:text-indigo-300 flex items-center gap-1.5">
+                          <Sparkles className="w-3.5 h-3.5 text-indigo-500" /> Executive Overview
+                        </span>
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => copyText(result.overview, 'kp-ov')}
+                            className="text-[10px] px-1.5 py-0.5 rounded border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-800 text-stone-600 dark:text-stone-300 flex items-center gap-1 cursor-pointer"
+                          >
+                            {copiedKey === 'kp-ov' ? <Check className="w-3 h-3 text-emerald-500" /> : <Copy className="w-3 h-3" />}
+                            Copy
+                          </button>
+                          <button
+                            onClick={() => {
+                              onAddNote(`📌 Overview: ${result.overview}`, 0, 'key_point');
+                              markSaved('kp-ov');
+                            }}
+                            className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-100 dark:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 flex items-center gap-1 font-medium cursor-pointer"
+                          >
+                            {savedKey === 'kp-ov' ? <Check className="w-3 h-3" /> : <BookmarkPlus className="w-3 h-3" />}
+                            Save
+                          </button>
+                        </div>
+                      </div>
+                      <p className="text-xs text-stone-700 dark:text-stone-300 leading-relaxed font-normal">
+                        {result.overview}
+                      </p>
+                    </div>
+
+                    {/* Synthesized Key Points Cards */}
+                    <div className="space-y-2.5">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-bold text-stone-800 dark:text-stone-200 flex items-center gap-1.5">
+                          <Award className="w-3.5 h-3.5 text-amber-500" /> Synthesized Key Points ({result.keyPoints.length})
+                        </span>
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => {
+                              const md = result.keyPoints
+                                .map((kp, idx) => `### ${idx + 1}. ${kp.title}\n${kp.summary}${kp.takeaway ? `\n> **Key Takeaway:** ${kp.takeaway}` : ''}`)
+                                .join('\n\n');
+                              copyText(md, 'kp-all');
+                            }}
+                            className="text-[10px] px-1.5 py-0.5 rounded border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-800 text-stone-600 dark:text-stone-300 flex items-center gap-1 cursor-pointer"
+                          >
+                            {copiedKey === 'kp-all' ? <Check className="w-3 h-3 text-emerald-500" /> : <Copy className="w-3 h-3" />}
+                            Copy All
+                          </button>
+                          <button
+                            onClick={() => {
+                              result.keyPoints.forEach((kp, idx) => {
+                                const body = `**${kp.title}**\n${kp.summary}${kp.takeaway ? `\n💡 Takeaway: ${kp.takeaway}` : ''}`;
+                                onAddNote(body, idx * 5, 'key_point');
+                              });
+                              markSaved('kp-all');
+                            }}
+                            className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-300 flex items-center gap-1 font-medium cursor-pointer"
+                          >
+                            {savedKey === 'kp-all' ? <Check className="w-3 h-3" /> : <BookmarkPlus className="w-3 h-3" />}
+                            Save All
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="space-y-2">
+                        {result.keyPoints.map((kp, idx) => (
+                          <div
+                            key={idx}
+                            className="p-3 rounded-xl border border-stone-200/80 dark:border-stone-800 bg-white dark:bg-stone-900/70 shadow-2xs space-y-1.5"
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <h5 className="text-xs font-bold text-stone-900 dark:text-white flex items-center gap-1.5">
+                                <span className="w-4 h-4 rounded-full bg-stone-100 dark:bg-stone-800 text-stone-600 dark:text-stone-400 text-[10px] flex items-center justify-center shrink-0">
+                                  {idx + 1}
+                                </span>
+                                <span>{kp.title}</span>
+                              </h5>
+                              <button
+                                onClick={() => {
+                                  const text = `**${kp.title}**\n${kp.summary}${kp.takeaway ? `\n💡 Takeaway: ${kp.takeaway}` : ''}`;
+                                  onAddNote(text, idx * 5, 'key_point');
+                                  markSaved(`kp-${idx}`);
+                                }}
+                                className="text-[10px] text-stone-400 hover:text-indigo-600 dark:hover:text-indigo-400 shrink-0 cursor-pointer p-0.5"
+                                title="Save this key point to session notes"
+                              >
+                                {savedKey === `kp-${idx}` ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <BookmarkPlus className="w-3.5 h-3.5" />}
+                              </button>
+                            </div>
+                            <p className="text-xs text-stone-600 dark:text-stone-300 leading-relaxed pl-5">
+                              {kp.summary}
+                            </p>
+                            {kp.takeaway && (
+                              <div className="ml-5 mt-1 pl-2.5 border-l-2 border-indigo-400 dark:border-indigo-600 py-0.5 bg-indigo-50/30 dark:bg-indigo-950/20 rounded-r-md">
+                                <p className="text-[11px] text-indigo-900 dark:text-indigo-200 font-medium">
+                                  <span className="font-bold text-indigo-700 dark:text-indigo-300">Takeaway: </span>
+                                  {kp.takeaway}
+                                </p>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Next Steps & Action Items */}
+                    {result.nextSteps && result.nextSteps.length > 0 && (
+                      <div className="p-3 rounded-xl border border-emerald-100 dark:border-emerald-950/80 bg-emerald-50/30 dark:bg-emerald-950/20 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[11px] font-bold text-emerald-800 dark:text-emerald-300 flex items-center gap-1.5">
+                            <ListTodo className="w-3.5 h-3.5 text-emerald-600" /> Action Items & Next Steps
+                          </span>
+                          <button
+                            onClick={() => {
+                              result.nextSteps.forEach((step, i) => onAddNote(`[Task] ${step}`, i * 4, 'task'));
+                              markSaved('kp-steps');
+                            }}
+                            className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 dark:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300 flex items-center gap-1 font-medium cursor-pointer"
+                          >
+                            {savedKey === 'kp-steps' ? <Check className="w-3 h-3" /> : <BookmarkPlus className="w-3 h-3" />}
+                            Save All Tasks
+                          </button>
+                        </div>
+                        <ul className="space-y-1 text-xs text-stone-700 dark:text-stone-300">
+                          {result.nextSteps.map((step, idx) => (
+                            <li key={idx} className="flex items-start gap-2">
+                              <span className="text-emerald-500 font-bold">✓</span>
+                              <span>{step}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {/* LECTURE MODE RESULTS */}
                 {result.template === 'lecture' && (
                   <div className="space-y-3">

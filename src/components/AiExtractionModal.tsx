@@ -3,6 +3,7 @@ import React, { useState } from 'react';
 import {
   X,
   Sparkles,
+  Award,
   BookOpen,
   Users,
   Layers,
@@ -25,10 +26,12 @@ import {
   aiService,
   ExtractionTemplate,
   ExtractionOutput,
+  KeyPointsResult,
   LectureResult,
   MeetingResult,
   FlashcardsResult,
   ExecutiveResult,
+  formatInsightsMarkdown,
 } from '../services/aiService';
 
 interface AiExtractionModalProps {
@@ -63,6 +66,13 @@ export const AiExtractionModal: React.FC<AiExtractionModalProps> = ({
     description: string;
     color: string;
   }[] = [
+    {
+      id: 'keypoints',
+      label: 'Key Insights Synthesis',
+      icon: Award,
+      description: 'Abstractive synthesis with descriptive themes, takeaways, and next steps',
+      color: 'text-violet-600 dark:text-violet-400 bg-violet-50 dark:bg-violet-950/40 border-violet-200 dark:border-violet-800',
+    },
     {
       id: 'lecture',
       label: 'Lecture Study Guide',
@@ -190,6 +200,29 @@ export const AiExtractionModal: React.FC<AiExtractionModalProps> = ({
       onAddNote(`🃏 Q: ${card.question}\nA: ${card.answer}`, Math.max(0, idx * 5), 'question_to_ask');
     });
     notifySaved('flashcards');
+  };
+
+  const handleSaveKeyPointsResult = (
+    type: 'overview' | 'keyPoints' | 'nextSteps' | 'all',
+    data: KeyPointsResult
+  ) => {
+    if (type === 'overview' || type === 'all') {
+      onAddNote(`📌 Overview: ${data.overview}`, 0, 'key_point');
+    }
+    if (type === 'keyPoints' || type === 'all') {
+      data.keyPoints.forEach((kp, idx) => {
+        const content = `**${kp.title}**\n${kp.summary}${kp.takeaway ? `\n💡 Key Takeaway: ${kp.takeaway}` : ''}`;
+        onAddNote(content, (idx + 1) * 5, 'key_point');
+      });
+    }
+    if (type === 'nextSteps' || type === 'all') {
+      if (data.nextSteps) {
+        data.nextSteps.forEach((step, idx) => {
+          onAddNote(`[Task] ${step}`, (idx + data.keyPoints.length + 1) * 5, 'task');
+        });
+      }
+    }
+    notifySaved(type);
   };
 
   const handleSaveExecutive = (data: ExecutiveResult) => {
@@ -351,6 +384,163 @@ export const AiExtractionModal: React.FC<AiExtractionModalProps> = ({
                   Template: {result.template}
                 </span>
               </div>
+
+              {/* KEY INSIGHTS / ABSTRACTIVE SYNTHESIS RENDERER */}
+              {result.template === 'keypoints' && (
+                <div className="space-y-5">
+                  {/* Executive Overview */}
+                  <div className="p-5 rounded-xl border border-violet-200 dark:border-violet-900/60 bg-linear-to-br from-violet-50/70 to-indigo-50/50 dark:from-violet-950/30 dark:to-indigo-950/20 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-xs font-bold uppercase tracking-wider text-violet-700 dark:text-violet-300 flex items-center gap-2">
+                        <Sparkles className="w-4 h-4 text-violet-500" /> Executive Overview
+                      </h4>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          onClick={() => copyToClipboard(`## Overview\n${result.overview}`, 'kp-overview')}
+                          className="px-2.5 py-1 text-xs rounded-lg border border-slate-200 dark:border-stone-700 bg-white dark:bg-stone-800 text-slate-700 dark:text-slate-300 flex items-center gap-1 hover:bg-slate-50 transition-colors"
+                        >
+                          {copiedSection === 'kp-overview' ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
+                          Copy Markdown
+                        </button>
+                        <button
+                          onClick={() => handleSaveKeyPointsResult('overview', result)}
+                          className="px-2.5 py-1 text-xs rounded-lg bg-violet-600 hover:bg-violet-700 text-white flex items-center gap-1 font-semibold transition-colors"
+                        >
+                          {savedSection === 'overview' ? <Check className="w-3.5 h-3.5" /> : <BookmarkPlus className="w-3.5 h-3.5" />}
+                          Save to Notes
+                        </button>
+                      </div>
+                    </div>
+                    <p className="text-sm text-slate-800 dark:text-slate-200 leading-relaxed font-normal">
+                      {result.overview}
+                    </p>
+                  </div>
+
+                  {/* Synthesized Key Points Grid */}
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300 flex items-center gap-2">
+                        <Award className="w-4 h-4 text-amber-500" /> Core Insights ({result.keyPoints.length})
+                      </h4>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          onClick={() => {
+                            const md = formatInsightsMarkdown(result);
+                            copyToClipboard(md, 'kp-all');
+                          }}
+                          className="px-2.5 py-1 text-xs rounded-lg border border-slate-200 dark:border-stone-700 bg-white dark:bg-stone-800 text-slate-700 dark:text-slate-300 flex items-center gap-1 hover:bg-slate-50"
+                        >
+                          {copiedSection === 'kp-all' ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
+                          Copy All Markdown
+                        </button>
+                        <button
+                          onClick={() => handleSaveKeyPointsResult('all', result)}
+                          className="px-2.5 py-1 text-xs rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white flex items-center gap-1 font-semibold"
+                        >
+                          {savedSection === 'all' ? <Check className="w-3.5 h-3.5" /> : <BookmarkPlus className="w-3.5 h-3.5" />}
+                          Save All to Notes
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-3.5">
+                      {result.keyPoints.map((point, idx) => (
+                        <div
+                          key={idx}
+                          className="p-4 rounded-xl border border-slate-200 dark:border-stone-800 bg-white dark:bg-stone-900/60 shadow-2xs space-y-2.5 transition-all hover:border-violet-300 dark:hover:border-violet-700"
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="flex items-center gap-2.5">
+                              <span className="w-6 h-6 rounded-lg bg-violet-100 dark:bg-violet-950 text-violet-700 dark:text-violet-300 font-bold text-xs flex items-center justify-center shrink-0">
+                                {idx + 1}
+                              </span>
+                              <h5 className="text-sm font-bold text-slate-900 dark:text-white">
+                                {point.title}
+                              </h5>
+                            </div>
+                            <div className="flex items-center gap-1">
+                              <button
+                                onClick={() => {
+                                  const singleMd = `### ${idx + 1}. ${point.title}\n${point.summary}${point.takeaway ? `\n> **Key Takeaway:** ${point.takeaway}` : ''}`;
+                                  copyToClipboard(singleMd, `kp-item-${idx}`);
+                                }}
+                                className="p-1 rounded text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
+                                title="Copy Markdown"
+                              >
+                                {copiedSection === `kp-item-${idx}` ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
+                              </button>
+                              <button
+                                onClick={() => {
+                                  const text = `**${point.title}**\n${point.summary}${point.takeaway ? `\n💡 Key Takeaway: ${point.takeaway}` : ''}`;
+                                  onAddNote(text, (idx + 1) * 5, 'key_point');
+                                  notifySaved(`kp-item-${idx}`);
+                                }}
+                                className="p-1 rounded text-slate-400 hover:text-violet-600 dark:hover:text-violet-400"
+                                title="Save to Notes"
+                              >
+                                {savedSection === `kp-item-${idx}` ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <BookmarkPlus className="w-3.5 h-3.5" />}
+                              </button>
+                            </div>
+                          </div>
+
+                          <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-300 leading-relaxed pl-8">
+                            {point.summary}
+                          </p>
+
+                          {point.takeaway && (
+                            <div className="ml-8 p-3 rounded-lg bg-violet-50/70 dark:bg-violet-950/30 border-l-3 border-violet-500 dark:border-violet-400">
+                              <p className="text-xs text-violet-950 dark:text-violet-200 font-medium leading-relaxed">
+                                <span className="font-bold text-violet-700 dark:text-violet-300">Key Takeaway: </span>
+                                {point.takeaway}
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Next Steps & Action Items */}
+                  {result.nextSteps && result.nextSteps.length > 0 && (
+                    <div className="p-4 rounded-xl border border-emerald-200 dark:border-emerald-950 bg-emerald-50/40 dark:bg-emerald-950/20 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <h4 className="text-xs font-bold uppercase tracking-wider text-emerald-700 dark:text-emerald-300 flex items-center gap-1.5">
+                          <ListTodo className="w-4 h-4 text-emerald-600" /> Action Items & Decisions ({result.nextSteps.length})
+                        </h4>
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            onClick={() => {
+                              const md = `## Next Steps\n` + result.nextSteps!.map((s) => `- [ ] ${s}`).join('\n');
+                              copyToClipboard(md, 'kp-steps');
+                            }}
+                            className="px-2 py-1 text-xs rounded-lg border border-slate-200 dark:border-stone-700 bg-white dark:bg-stone-800 text-slate-700 dark:text-slate-300 flex items-center gap-1"
+                          >
+                            {copiedSection === 'kp-steps' ? <Check className="w-3 h-3 text-emerald-500" /> : <Copy className="w-3 h-3" />}
+                            Copy
+                          </button>
+                          <button
+                            onClick={() => handleSaveKeyPointsResult('nextSteps', result)}
+                            className="px-2 py-1 text-xs rounded-lg bg-emerald-100 dark:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300 flex items-center gap-1 font-semibold"
+                          >
+                            {savedSection === 'nextSteps' ? <Check className="w-3 h-3" /> : <BookmarkPlus className="w-3 h-3" />}
+                            Save Tasks
+                          </button>
+                        </div>
+                      </div>
+                      <div className="space-y-1.5">
+                        {result.nextSteps.map((step, idx) => (
+                          <div key={idx} className="flex items-start gap-2 text-xs text-slate-700 dark:text-slate-300">
+                            <span className="w-4 h-4 rounded-full bg-emerald-100 dark:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 font-bold flex items-center justify-center shrink-0 mt-0.5 text-[10px]">
+                              ✓
+                            </span>
+                            <span className="leading-relaxed">{step}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* LECTURE RENDERER */}
               {result.template === 'lecture' && (
