@@ -1,21 +1,29 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { dbService } from './services/db';
 import { transcriptionService, TranscriptionProgress } from './services/transcriptionService';
-import { AppSettings, CalloutType, Folder, FontMode, Note, Session, SessionImage, ThemeMode, TranscriptionChunk } from './types';
-import { formatTime } from './utils/audio';
+import { AppSettings, CalloutType, Folder, FontMode, MainNavView, Note, ReadingFont, Session, SessionImage, ThemeMode, TranscriptionChunk } from './types';
+import { formatTime, downloadNativeAudio } from './utils/audio';
 import { isApplePlatform, modifierKey } from './utils/platform';
 import { generateStandaloneHtml } from './utils/exportHtml';
 import { parsePdfSlides } from './utils/pdfParser';
 import { Sidebar } from './components/Sidebar';
+import { NavigationSidebar } from './components/NavigationSidebar';
+import { AccessibilityModal } from './components/AccessibilityModal';
+import { AllRecordingsView } from './components/AllRecordingsView';
+import { DownloadsView } from './components/DownloadsView';
+import { ImportExportView } from './components/ImportExportView';
+import { downloadTracker } from './services/downloadTracker';
 import { AudioPlayer } from './components/AudioPlayer';
 import { NotesFeed } from './components/NotesFeed';
 import { DashboardView } from './components/DashboardView';
 import { KeyboardShortcutsModal } from './components/KeyboardShortcutsModal';
 import { ConfirmDeleteModal } from './components/ConfirmDeleteModal';
+import { CreateFolderModal } from './components/CreateFolderModal';
 import { PWAInstallButton } from './components/PWAInstallButton';
 import { SyncPanel } from './components/SyncPanel';
 import { OnboardingWarning } from './components/OnboardingWarning';
 import { BrandLogo } from './components/BrandLogo';
+import { AiExtractionModal } from './components/AiExtractionModal';
 import {
   Menu,
   Plus,
@@ -82,6 +90,11 @@ export default function App() {
       }
     }
 
+    const safeTitle = (sess.title || 'Lecture-Notes')
+      .replace(/[\\/:*?"<>|]/g, '_')
+      .trim() || 'Lecture-Notes';
+    const mdFileName = `${safeTitle}.md`;
+
     if (fileSystemService.isSupported()) {
       const handle = await fileSystemService.getStoredHandle();
       if (handle) {
@@ -89,12 +102,15 @@ export default function App() {
         if (hasPerm) {
           const mdString = generateMarkdownString(sess, sessNotes);
           const mdBlob = new Blob([mdString], { type: 'text/markdown;charset=utf-8' });
-          const safeTitle = (sess.title || 'Lecture-Notes')
-            .replace(/[\\/:*?"<>|]/g, '_')
-            .trim() || 'Lecture-Notes';
-          const mdFileName = `${safeTitle}.md`;
           const saved = await fileSystemService.saveFileToDirectory(mdFileName, mdBlob);
           if (saved) {
+            downloadTracker.addDownload({
+              sessionId: sess.id,
+              title: sess.title,
+              format: 'md',
+              fileName: mdFileName,
+              status: 'completed',
+            });
             showToast(`Saved notes to local folder: ${mdFileName}`);
             return;
           }
@@ -104,10 +120,39 @@ export default function App() {
 
     // Fall back to browser download
     await exportSessionToMarkdown(sess, sessNotes);
+    downloadTracker.addDownload({
+      sessionId: sess.id,
+      title: sess.title,
+      format: 'md',
+      fileName: mdFileName,
+      status: 'completed',
+    });
+  };
+
+  const handleDownloadSessionAudio = (sess: Session) => {
+    if (!sess.audioBlob) {
+      showToast('No audio data available to download.');
+      return;
+    }
+    const cleanTitle = (sess.title || 'recording')
+      .replace(/[^a-zA-Z0-9_\-\s]/g, '')
+      .replace(/\s+/g, '_')
+      .toLowerCase();
+    const fileName = `${cleanTitle || 'recording'}.webm`;
+    downloadNativeAudio(sess.audioBlob, fileName);
+    downloadTracker.addDownload({
+      sessionId: sess.id,
+      title: sess.title,
+      format: 'webm',
+      fileName,
+      status: 'completed',
+    });
+    showToast(`Downloading audio: ${fileName}`);
   };
 
   // Database entities
   const [folders, setFolders] = useState<Folder[]>([]);
+  const [isCreateFolderOpen, setIsCreateFolderOpen] = useState<boolean>(false);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [notes, setNotes] = useState<Note[]>([]);
   const [activeFolderId, setActiveFolderId] = useState<string | 'all' | 'bin'>('all');
@@ -148,6 +193,9 @@ export default function App() {
   const [isSyncOpen, setIsSyncOpen] = useState<boolean>(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState<boolean>(false);
+  const [activeNavView, setActiveNavView] = useState<MainNavView>('folders');
+  const [isAccessibilityOpen, setIsAccessibilityOpen] = useState<boolean>(false);
+  const [isAiExtractionOpen, setIsAiExtractionOpen] = useState<boolean>(false);
   const mainAudioImportRef = useRef<HTMLInputElement | null>(null);
 
   // Audio element ref
@@ -1169,16 +1217,28 @@ export default function App() {
   };
 
   // 6. Folders management
-  const handleCreateFolder = async (name: string, color: string) => {
+  const handleCreateFolder = async (folderName: string, selectedColor?: string) => {
+    if (!folderName.trim()) return;
+
     const newFolder: Folder = {
-      id: `folder-${Date.now()}`,
-      name,
-      color,
+      id: `folder-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+      name: folderName.trim(),
+      color: selectedColor || '#0ea5e9',
+      createdAt: Date.now(),
+      isDeleted: false,
     };
-    await dbService.saveFolder(newFolder);
-    const updated = await dbService.getAllFolders();
-    setFolders(updated);
-    setActiveFolderId(newFolder.id);
+
+    try {
+      await dbService.saveFolder(newFolder);
+      setFolders((prev) => [...prev, newFolder]);
+      setActiveFolderId(newFolder.id);
+      setIsCreateFolderOpen(false);
+      showToast(`Folder "${newFolder.name}" created!`);
+    } catch (error) {
+      console.error('Folder save error:', error);
+      showToast('Failed to save folder to database.');
+      throw error;
+    }
   };
 
   const handleDeleteFolder = async (folderId: string) => {
@@ -1201,22 +1261,39 @@ export default function App() {
 
   // 8. Standalone HTML Export feature
   const handleExportStandaloneHtml = async () => {
-    if (!currentSession) {
-      showToast('Please select a session first.');
+    const sessionToExport =
+      currentSession || sessions.find((s) => !s.deletedAt) || sessions[0];
+    if (!sessionToExport) {
+      showToast('No sessions available to export.');
       return;
     }
 
     try {
-      const folder = folders.find((f) => f.id === currentSession.folderId);
+      const folder = folders.find((f) => f.id === sessionToExport.folderId);
       const folderName = folder ? folder.name : 'General';
-      const htmlContent = await generateStandaloneHtml(currentSession, notes, folderName);
+      const sessNotes =
+        currentSession?.id === sessionToExport.id
+          ? notes
+          : await dbService.getNotesBySession(sessionToExport.id);
+      const htmlContent = await generateStandaloneHtml(sessionToExport, sessNotes, folderName);
       const blob = new Blob([htmlContent], { type: 'text/html' });
       const url = URL.createObjectURL(blob);
+      const cleanTitle = (sessionToExport.title || 'Pinpoint_Session')
+        .replace(/[^a-zA-Z0-9_\-\s]/g, '')
+        .replace(/\s+/g, '_');
+      const fileName = `${cleanTitle}_Offline.html`;
       const a = document.createElement('a');
       a.href = url;
-      a.download = `${currentSession.title.replace(/\s+/g, '_')}_Offline.html`;
+      a.download = fileName;
       a.click();
       URL.revokeObjectURL(url);
+      downloadTracker.addDownload({
+        sessionId: sessionToExport.id,
+        title: sessionToExport.title,
+        format: 'html',
+        fileName,
+        status: 'completed',
+      });
       showToast('Standalone single-file HTML exported!');
     } catch (err) {
       console.error('Standalone HTML export error:', err);
@@ -1388,16 +1465,27 @@ export default function App() {
     settings.fontMode,
   ]);
 
-  // Sync root element classes with global theme state
+  // Sync root element classes with global theme and accessibility state
   useEffect(() => {
     const root = document.documentElement;
-    root.classList.remove('dark', 'sepia');
+    root.classList.remove('dark', 'sepia', 'high-contrast', 'reduced-motion');
     if (settings.theme === 'dark') {
       root.classList.add('dark');
     } else if (settings.theme === 'sepia') {
       root.classList.add('sepia');
     }
-  }, [settings.theme]);
+    if (settings.highContrast) {
+      root.classList.add('high-contrast');
+    }
+    if (settings.reducedMotion) {
+      root.classList.add('reduced-motion');
+    }
+    if (settings.uiScale && settings.uiScale !== 100) {
+      root.style.fontSize = `${(settings.uiScale / 100) * 16}px`;
+    } else {
+      root.style.fontSize = '';
+    }
+  }, [settings.theme, settings.highContrast, settings.reducedMotion, settings.uiScale]);
 
   // Theme styling classes
   const themeClasses: Record<ThemeMode, string> = {
@@ -1406,12 +1494,19 @@ export default function App() {
     sepia: 'sepia bg-[#F4ECD8] text-[#272016]',
   };
 
-  const fontClass = settings.fontMode === 'dyslexic' ? 'font-dyslexic' : 'font-standard';
+  const fontClass =
+    settings.readingFont === 'dyslexic' || settings.fontMode === 'dyslexic'
+      ? 'font-dyslexic'
+      : settings.readingFont === 'serif'
+      ? 'font-serif'
+      : settings.readingFont === 'mono'
+      ? 'font-mono'
+      : 'font-sans';
 
   return (
     <div
       data-theme={settings.theme}
-      className={`w-screen h-screen flex flex-col overflow-hidden ${
+      className={`w-screen h-screen flex overflow-hidden ${
         themeClasses[settings.theme] || themeClasses.light
       } ${fontClass}`}
     >
@@ -1479,227 +1574,243 @@ export default function App() {
         />
       )}
 
-      {/* Top Bar Contract (Clean 1-row, 3-zone) */}
-      <header className="h-13 border-b border-[#e8e4dc] dark:border-stone-800 bg-[#fcfbf9] dark:bg-stone-900 px-4 md:px-6 flex items-center justify-between shrink-0 select-none z-20">
-        {/* Zone 1: Brand / Navigation Trigger */}
-        <div className="flex items-center gap-2 sm:gap-3">
-          {currentView === 'workspace' ? (
+      {/* Persistent Left Sidebar */}
+      <NavigationSidebar
+        activeNavView={activeNavView}
+        onSelectNavView={(view) => {
+          setActiveNavView(view);
+          setSelectedFolderForDrilldown(null);
+          if (currentView !== 'dashboard') {
+            setCurrentView('dashboard');
+          }
+        }}
+        folderCount={folders.length}
+        recordingCount={sessions.filter((s) => !s.deletedAt).length}
+        downloadsCount={downloadTracker.getDownloads().length}
+        storageUsage={storageUsage}
+        deletedSessionsCount={sessions.filter((s) => !!s.deletedAt).length}
+        onSelectBin={() => {
+          setActiveNavView('folders');
+          setSelectedFolderForDrilldown('bin');
+          if (currentView !== 'dashboard') {
+            setCurrentView('dashboard');
+          }
+        }}
+        isBinActive={selectedFolderForDrilldown === 'bin'}
+        onOpenAccessibility={() => setIsAccessibilityOpen(true)}
+        settings={settings}
+        onImportAudioClick={() => mainAudioImportRef.current?.click()}
+        onSelectLocalFolder={handleSelectLocalFolder}
+        localDirName={localDirName}
+        onOpenSync={() => setIsSyncOpen(true)}
+        isFsSupported={isFsSupported}
+        onOpenCreateFolderModal={() => setIsCreateFolderOpen(true)}
+        onOpenShortcuts={() => setIsShortcutsOpen(true)}
+        isMobileOpen={isMobileSidebarOpen}
+        onCloseMobile={() => setIsMobileSidebarOpen(false)}
+      />
+
+      {/* Main Content Area Column */}
+      <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden relative">
+        {/* Simplified Header */}
+        <header className="h-13 border-b border-[#e8e4dc] dark:border-stone-800 bg-[#fcfbf9] dark:bg-stone-900 px-4 md:px-6 flex items-center justify-between shrink-0 select-none z-20">
+          {/* Zone 1: Navigation Trigger & Breadcrumb */}
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+            {/* Mobile Hamburger toggle to open left sidebar */}
             <button
-              onClick={() => setCurrentView('dashboard')}
-              title="Return to Folder Dashboard"
-              className="py-1.5 px-3 rounded-xl bg-white dark:bg-stone-800 hover:bg-[#f0ece4] dark:hover:bg-stone-700 text-stone-800 dark:text-stone-200 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer border border-[#e8e4dc] dark:border-stone-700 shadow-2xs"
+              onClick={() => setIsMobileSidebarOpen(true)}
+              className="p-1.5 rounded-xl border border-[#e8e4dc] dark:border-stone-800 bg-white dark:bg-stone-800 hover:bg-[#f0ece4] dark:hover:bg-stone-700 text-stone-700 dark:text-stone-300 md:hidden cursor-pointer shadow-2xs shrink-0"
+              aria-label="Open sidebar navigation"
             >
-              <ArrowLeft className="w-3.5 h-3.5" />
-              <span>Back to Folders</span>
+              <Menu className="w-4 h-4" />
             </button>
-          ) : (
-            <BrandLogo size="sm" />
-          )}
 
-          {currentView === 'workspace' && (
-            <div className="hidden sm:flex items-center gap-1.5 text-xs text-stone-500 border-l border-[#e8e4dc] dark:border-stone-700 pl-3 ml-1">
-              <span className="font-semibold text-stone-900 dark:text-stone-200 truncate max-w-[200px]">
-                {currentSession ? currentSession.title : 'Active Session'}
-              </span>
-            </div>
-          )}
-        </div>
-
-        {/* Zone 2: Clean Center Indicator */}
-        <div className="hidden md:flex items-center gap-2 text-xs font-medium text-stone-600 dark:text-stone-400">
-          {currentView === 'workspace' ? (
-            <span>
-              {notes.length} {notes.length === 1 ? 'note' : 'notes'}
-            </span>
-          ) : (
-            <>
-              <span>{folders.length} Folders</span>
-              <span aria-hidden="true" className="text-stone-300 dark:text-stone-700">·</span>
-              <span>{sessions.filter((s) => !s.deletedAt).length} Recordings</span>
-            </>
-          )}
-        </div>
-
-        {/* Zone 3: Quick Action & Accessibility Controls */}
-        <div className="flex items-center gap-1.5 sm:gap-2">
-          {/* Typography Toggle: Standard vs OpenDyslexic */}
-          <button
-            onClick={() =>
-              handleUpdateSettings({
-                fontMode: settings.fontMode === 'dyslexic' ? 'standard' : 'dyslexic',
-              })
-            }
-            title="Toggle OpenDyslexic Font"
-            className={`px-2.5 py-1.5 rounded-xl border text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer shadow-2xs ${
-              settings.fontMode === 'dyslexic'
-                ? 'bg-indigo-600 text-white border-indigo-600'
-                : 'bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200 border-[#e8e4dc] dark:border-stone-700 hover:bg-[#f0ece4]'
-            }`}
-          >
-            <Type className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">
-              {settings.fontMode === 'dyslexic' ? 'Dyslexic ON' : 'Sans'}
-            </span>
-          </button>
-
-          {/* Theme Toggle */}
-          <button
-            onClick={() => {
-              const themes: ThemeMode[] = ['light', 'dark', 'sepia'];
-              const currentIndex = themes.indexOf(settings.theme);
-              const nextTheme = themes[(currentIndex !== -1 ? currentIndex + 1 : 0) % themes.length];
-              handleUpdateSettings({ theme: nextTheme });
-            }}
-            title="Cycle Theme (Light → Dark → Sepia)"
-            className="p-1.5 sm:px-2.5 sm:py-1.5 rounded-xl border border-[#e8e4dc] dark:border-stone-700 bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200 hover:bg-[#f0ece4] dark:hover:bg-stone-700 text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer shadow-2xs"
-          >
-            {settings.theme === 'dark' ? (
-              <Moon className="w-3.5 h-3.5 text-indigo-400" />
-            ) : settings.theme === 'sepia' ? (
-              <Palette className="w-3.5 h-3.5 text-amber-700 dark:text-amber-400" />
+            {currentView === 'workspace' ? (
+              <button
+                onClick={() => setCurrentView('dashboard')}
+                title="Return to Dashboard"
+                className="py-1.5 px-3 rounded-xl bg-white dark:bg-stone-800 hover:bg-[#f0ece4] dark:hover:bg-stone-700 text-stone-800 dark:text-stone-200 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer border border-[#e8e4dc] dark:border-stone-700 shadow-2xs shrink-0"
+              >
+                <ArrowLeft className="w-3.5 h-3.5" />
+                <span>Back to Dashboard</span>
+              </button>
             ) : (
-              <Sun className="w-3.5 h-3.5 text-amber-500" />
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="text-sm font-bold text-stone-900 dark:text-white truncate">
+                  {activeNavView === 'folders'
+                    ? selectedFolderForDrilldown === 'bin'
+                      ? 'Trash Bin'
+                      : selectedFolderForDrilldown
+                      ? folders.find((f) => f.id === selectedFolderForDrilldown)?.name || 'Folder'
+                      : 'Folders Dashboard'
+                    : activeNavView === 'all-recordings'
+                    ? 'All Recordings'
+                    : activeNavView === 'downloads'
+                    ? 'Export & Downloads'
+                    : 'Import, Export & Sync'}
+                </span>
+              </div>
             )}
-            <span className="hidden sm:inline capitalize">{settings.theme}</span>
-          </button>
 
-          {/* Import Audio Action in Header */}
-          <button
-            onClick={() => mainAudioImportRef.current?.click()}
-            title="Import Audio File (.webm, .m4a, .mp3, .wav)"
-            className="px-2.5 py-1.5 rounded-xl border border-[#e8e4dc] dark:border-stone-700 bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200 hover:bg-[#f0ece4] dark:hover:bg-stone-700 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs"
-          >
-            <Upload className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
-            <span className="hidden sm:inline">Import Audio</span>
-          </button>
-          <input
-            ref={mainAudioImportRef}
-            type="file"
-            accept="audio/webm, audio/mp4, audio/mp3, audio/wav, audio/*"
-            className="hidden"
-            onChange={(e) => {
-              if (e.target.files && e.target.files[0]) {
-                handleAudioUploaded(e.target.files[0]);
-                e.target.value = '';
-              }
-            }}
-          />
+            {currentView === 'workspace' && (
+              <div className="hidden sm:flex items-center gap-1.5 text-xs text-stone-500 border-l border-[#e8e4dc] dark:border-stone-700 pl-3 ml-1 min-w-0">
+                <span className="font-semibold text-stone-900 dark:text-stone-200 truncate max-w-[220px]">
+                  {currentSession ? currentSession.title : 'Active Session'}
+                </span>
+              </div>
+            )}
+          </div>
 
-          {/* Local Folder Auto-Save Button (Chrome/Edge File System Access API) */}
-          {isFsSupported ? (
-            <button
-              onClick={handleSelectLocalFolder}
-              title={
-                localDirName
-                  ? `Recordings auto-save directly to local folder /${localDirName}. Click to change folder.`
-                  : 'Pick a folder on your computer to auto-save recordings to disk (File System Access API)'
-              }
-              className={`px-2.5 py-1.5 rounded-xl border text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs ${
-                localDirName
-                  ? 'bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/60 dark:hover:bg-amber-900/60 border-amber-300 dark:border-amber-800 text-amber-900 dark:text-amber-200'
-                  : 'border-[#e8e4dc] dark:border-stone-700 bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200 hover:bg-[#f0ece4] dark:hover:bg-stone-700'
-              }`}
-            >
-              <HardDrive className={`w-3.5 h-3.5 ${localDirName ? 'text-amber-600 dark:text-amber-400' : 'text-indigo-600 dark:text-indigo-400'}`} />
-              <span className="hidden sm:inline">
-                {localDirName ? `📁 Saving to: /${localDirName}` : 'Set Local Folder'}
+          {/* Zone 2: Center Status Indicator */}
+          <div className="hidden md:flex items-center gap-2 text-xs font-medium text-stone-600 dark:text-stone-400">
+            {currentView === 'workspace' ? (
+              <span>
+                {notes.length} {notes.length === 1 ? 'note' : 'notes'}
               </span>
-            </button>
-          ) : (
-            <div
-              title="Direct local folder writing requires Chrome, Edge, or Opera (File System Access API)"
-              className="px-2.5 py-1.5 rounded-xl border border-stone-200 dark:border-stone-800 bg-stone-100 dark:bg-stone-800/60 text-stone-400 dark:text-stone-500 text-xs font-medium flex items-center gap-1.5 cursor-not-allowed select-none opacity-80"
-            >
-              <HardDrive className="w-3.5 h-3.5" />
-              <span className="hidden lg:inline">Local Folder (Chrome/Edge only)</span>
-            </div>
-          )}
+            ) : activeNavView === 'folders' ? (
+              <>
+                <span>{folders.length} Folders</span>
+                <span aria-hidden="true" className="text-stone-300 dark:text-stone-700">·</span>
+                <span>{sessions.filter((s) => !s.deletedAt).length} Recordings</span>
+              </>
+            ) : activeNavView === 'all-recordings' ? (
+              <span>{sessions.filter((s) => !s.deletedAt).length} Recordings</span>
+            ) : activeNavView === 'downloads' ? (
+              <span>{downloadTracker.getDownloads().length} Exports recorded</span>
+            ) : (
+              <span>Direct File System & Sync</span>
+            )}
+          </div>
 
-          {/* WebRTC P2P Device Sync Button */}
-          <button
-            onClick={() => setIsSyncOpen(true)}
-            title="Open WebRTC P2P Device Sync"
-            className="px-2.5 py-1.5 rounded-xl border border-emerald-300 dark:border-emerald-800/80 bg-emerald-50 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs"
-          >
-            <ArrowRightLeft className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-            <span className="hidden sm:inline">P2P Sync</span>
-          </button>
+          {/* Zone 3: Essential Actions */}
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+            {/* PWA Install Button */}
+            <PWAInstallButton variant="header" />
 
-          {/* PWA Install Button */}
-          <PWAInstallButton variant="header" />
-
-          {/* Keyboard Shortcuts Trigger Button */}
-          <button
-            onClick={() => setIsShortcutsOpen(true)}
-            title="Keyboard Shortcuts Cheat Sheet (?)"
-            className="px-2.5 py-1.5 rounded-xl border border-[#e8e4dc] dark:border-stone-700 bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200 hover:bg-[#f0ece4] dark:hover:bg-stone-700 text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer shadow-2xs"
-          >
-            <Keyboard className="w-3.5 h-3.5 text-stone-500 dark:text-stone-400" />
-            <kbd className="px-1 py-0.2 rounded bg-[#f0ece4] dark:bg-stone-900 border border-stone-300 dark:border-stone-700 text-[10px] font-mono">
-              ?
-            </kbd>
-          </button>
-
-          {currentView === 'workspace' && currentSession && (
+            {/* Keyboard Shortcuts Trigger Button */}
             <button
-              onClick={() => handleExportNotes(currentSession)}
-              disabled={!hasSessionExportableContent(currentSession, notes)}
-              title={
-                hasSessionExportableContent(currentSession, notes)
-                  ? 'Export session notes & transcript as Markdown (.md)'
-                  : 'No notes or transcript available to export'
-              }
-              className="px-2.5 py-1.5 rounded-xl border border-[#e8e4dc] dark:border-stone-700 bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200 hover:bg-[#f0ece4] dark:hover:bg-stone-700 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs disabled:opacity-40 disabled:cursor-not-allowed"
+              onClick={() => setIsShortcutsOpen(true)}
+              title="Keyboard Shortcuts Cheat Sheet (?)"
+              className="px-2.5 py-1.5 rounded-xl border border-[#e8e4dc] dark:border-stone-700 bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200 hover:bg-[#f0ece4] dark:hover:bg-stone-700 text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer shadow-2xs"
             >
-              <FileDown className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
-              <span className="hidden sm:inline">Export Notes</span>
-            </button>
-          )}
-
-          {currentView === 'workspace' && (
-            <button
-              onClick={() => {
-                setShowMobileNotes(true);
-                setQuickAddTriggered(true);
-              }}
-              className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer whitespace-nowrap"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Add Note</span>
-              <kbd className="hidden lg:inline text-[10px] bg-indigo-700/80 px-1 py-0.2 rounded font-sans">
-                {modifierKey}M
+              <Keyboard className="w-3.5 h-3.5 text-stone-500 dark:text-stone-400" />
+              <kbd className="px-1 py-0.2 rounded bg-[#f0ece4] dark:bg-stone-900 border border-stone-300 dark:border-stone-700 text-[10px] font-mono">
+                ?
               </kbd>
             </button>
-          )}
-        </div>
-      </header>
 
-      {/* Main App Content: Dashboard View vs Workspace View */}
-      {currentView === 'dashboard' ? (
-        <DashboardView
-          folders={folders}
-          sessions={sessions}
-          selectedFolderId={selectedFolderForDrilldown}
-          storageUsage={storageUsage}
-          onSelectFolder={(folderId) => setSelectedFolderForDrilldown(folderId)}
-          onOpenSession={handleOpenSessionFromDashboard}
-          onCreateFolder={handleCreateFolder}
-          onDeleteFolder={handleDeleteFolder}
-          onCreateSessionInFolder={handleCreateSessionInFolder}
-          onDeleteSession={handleDeleteSession}
-          onRestoreSession={handleRestoreSession}
-          onHardDeleteSession={handleHardDeleteSession}
-          onEmptyBin={handleEmptyBin}
-          onAudioUploadedInFolder={handleAudioUploadedInFolder}
-          onImportAudio={handleAudioUploaded}
-          onExportStandaloneHtml={handleExportStandaloneHtml}
-          onOpenShortcuts={() => setIsShortcutsOpen(true)}
-          onOpenSync={() => setIsSyncOpen(true)}
-          localDirName={localDirName}
-          onSelectLocalFolder={handleSelectLocalFolder}
-          onShowToast={showToast}
-        />
-      ) : (
+            {currentView === 'workspace' && currentSession && (
+              <button
+                onClick={() => setIsAiExtractionOpen(true)}
+                title="AI Knowledge Extraction (Lecture, Meeting, Flashcards, Executive)"
+                className="px-2.5 py-1.5 rounded-xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50/80 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                <span className="hidden sm:inline">AI Extract</span>
+              </button>
+            )}
+
+            {currentView === 'workspace' && currentSession && (
+              <button
+                onClick={() => handleExportNotes(currentSession)}
+                disabled={!hasSessionExportableContent(currentSession, notes)}
+                title={
+                  hasSessionExportableContent(currentSession, notes)
+                    ? 'Export session notes & transcript as Markdown (.md)'
+                    : 'No notes or transcript available to export'
+                }
+                className="px-2.5 py-1.5 rounded-xl border border-[#e8e4dc] dark:border-stone-700 bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200 hover:bg-[#f0ece4] dark:hover:bg-stone-700 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <FileDown className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                <span className="hidden sm:inline">Export Notes</span>
+              </button>
+            )}
+
+            {currentView === 'workspace' && (
+              <button
+                onClick={() => {
+                  setShowMobileNotes(true);
+                  setQuickAddTriggered(true);
+                }}
+                className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer whitespace-nowrap"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Add Note</span>
+                <kbd className="hidden lg:inline text-[10px] bg-indigo-700/80 px-1 py-0.2 rounded font-sans">
+                  {modifierKey}M
+                </kbd>
+              </button>
+            )}
+          </div>
+        </header>
+
+        {/* Main Content: Dashboard Subviews vs Workspace View */}
+        {currentView === 'dashboard' ? (
+          activeNavView === 'folders' ? (
+            <DashboardView
+              folders={folders}
+              sessions={sessions}
+              selectedFolderId={selectedFolderForDrilldown}
+              storageUsage={storageUsage}
+              onSelectFolder={(folderId) => setSelectedFolderForDrilldown(folderId)}
+              onOpenSession={handleOpenSessionFromDashboard}
+              onCreateFolder={handleCreateFolder}
+              onOpenCreateFolderModal={() => setIsCreateFolderOpen(true)}
+              onDeleteFolder={handleDeleteFolder}
+              onCreateSessionInFolder={handleCreateSessionInFolder}
+              onDeleteSession={handleDeleteSession}
+              onRestoreSession={handleRestoreSession}
+              onHardDeleteSession={handleHardDeleteSession}
+              onEmptyBin={handleEmptyBin}
+              onAudioUploadedInFolder={handleAudioUploadedInFolder}
+              onImportAudio={handleAudioUploaded}
+              onExportStandaloneHtml={handleExportStandaloneHtml}
+              onOpenShortcuts={() => setIsShortcutsOpen(true)}
+              onOpenSync={() => setIsSyncOpen(true)}
+              localDirName={localDirName}
+              onSelectLocalFolder={handleSelectLocalFolder}
+              onShowToast={showToast}
+            />
+          ) : activeNavView === 'all-recordings' ? (
+            <AllRecordingsView
+              sessions={sessions}
+              folders={folders}
+              onOpenSession={handleOpenSessionFromDashboard}
+              onDeleteSession={handleDeleteSession}
+              onExportNotes={handleExportNotes}
+              onCreateNewRecording={() => {
+                const targetFolderId = folders[0]?.id || 'lectures-default';
+                handleCreateSessionInFolder(targetFolderId);
+              }}
+            />
+          ) : activeNavView === 'downloads' ? (
+            <DownloadsView
+              sessions={sessions}
+              onOpenSession={handleOpenSessionFromDashboard}
+              onExportNotes={handleExportNotes}
+              onDownloadAudio={handleDownloadSessionAudio}
+              localDirName={localDirName}
+              onShowToast={showToast}
+            />
+          ) : (
+            <ImportExportView
+              folders={folders}
+              onImportAudio={handleAudioUploaded}
+              onAudioUploadedInFolder={handleAudioUploadedInFolder}
+              localDirName={localDirName}
+              onSelectLocalFolder={handleSelectLocalFolder}
+              onRemoveLocalFolder={() => {
+                fileSystemService.clearStoredHandle();
+                setLocalDirName(null);
+                showToast('Disconnected from local folder');
+              }}
+              isFsSupported={isFsSupported}
+              onOpenSync={() => setIsSyncOpen(true)}
+              onExportStandaloneHtml={handleExportStandaloneHtml}
+              onShowToast={showToast}
+            />
+          )
+        ) : (
         /* Workspace View: Split-Screen Editor on Desktop, Tabbed Switcher on Mobile */
         <div className="flex-1 flex overflow-hidden relative">
           {/* Left Panel: Audio Interface & Scrubber */}
@@ -1775,6 +1886,7 @@ export default function App() {
           </div>
         </div>
       )}
+      </div>
 
       {/* Floating Notification Toast */}
       {toastMessage && (
@@ -1808,6 +1920,32 @@ export default function App() {
 
       {/* First-Time Offline Data Storage Warning Modal */}
       <OnboardingWarning />
+
+      {/* Create Folder Modal */}
+      <CreateFolderModal
+        isOpen={isCreateFolderOpen}
+        onClose={() => setIsCreateFolderOpen(false)}
+        onCreateFolder={handleCreateFolder}
+        setFolders={setFolders}
+        showToast={showToast}
+      />
+
+      {/* Accessibility Features Modal */}
+      <AccessibilityModal
+        isOpen={isAccessibilityOpen}
+        onClose={() => setIsAccessibilityOpen(false)}
+        settings={settings}
+        onUpdateSettings={handleUpdateSettings}
+      />
+
+      {/* Multi-Template AI Extraction Modal */}
+      <AiExtractionModal
+        isOpen={isAiExtractionOpen}
+        onClose={() => setIsAiExtractionOpen(false)}
+        currentSession={currentSession}
+        onAddNote={handleAddNote}
+        onRefreshSession={handleReloadLibrary}
+      />
     </div>
   );
 }

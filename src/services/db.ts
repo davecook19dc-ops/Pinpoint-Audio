@@ -1,7 +1,7 @@
 import { AppSettings, Folder, Note, Session, ExportDataPayload } from '../types';
 
 const DB_NAME = 'PinpointAudioDB';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 class IndexedDBStorage {
   private dbPromise: Promise<IDBDatabase> | null = null;
@@ -249,8 +249,15 @@ class IndexedDBStorage {
   // --- Folders ---
   async getAllFolders(): Promise<Folder[]> {
     const db = await this.getDB();
+    if (!db.objectStoreNames.contains('folders')) {
+      return [];
+    }
     return new Promise((resolve, reject) => {
       const tx = db.transaction('folders', 'readonly');
+      tx.onerror = () => {
+        console.error('Folder read error:', tx.error);
+        reject(tx.error);
+      };
       const store = tx.objectStore('folders');
       const request = store.getAll();
       request.onsuccess = () => resolve(request.result || []);
@@ -265,6 +272,8 @@ class IndexedDBStorage {
         id: 'lectures-default',
         name: 'Lectures',
         color: '#10B981',
+        createdAt: Date.now(),
+        isDeleted: false,
       };
       await this.saveFolder(defaultFolder);
       return [defaultFolder];
@@ -275,18 +284,35 @@ class IndexedDBStorage {
   async saveFolder(folder: Folder): Promise<void> {
     const db = await this.getDB();
     return new Promise((resolve, reject) => {
+      if (!db.objectStoreNames.contains('folders')) {
+        const err = new Error("Object store 'folders' does not exist in PinpointAudioDB");
+        console.error('Folder save error:', err);
+        return reject(err);
+      }
       const tx = db.transaction('folders', 'readwrite');
+      tx.onerror = () => {
+        console.error('Folder save error:', tx.error);
+        reject(tx.error);
+      };
       const store = tx.objectStore('folders');
       const request = store.put(folder);
       request.onsuccess = () => resolve();
-      request.onerror = () => reject(request.error);
+      request.onerror = () => {
+        console.error('Folder save error:', request.error);
+        reject(request.error);
+      };
     });
   }
 
   async deleteFolder(id: string): Promise<void> {
     const db = await this.getDB();
+    if (!db.objectStoreNames.contains('folders')) return;
     return new Promise((resolve, reject) => {
       const tx = db.transaction('folders', 'readwrite');
+      tx.onerror = () => {
+        console.error('Folder delete error:', tx.error);
+        reject(tx.error);
+      };
       const store = tx.objectStore('folders');
       const request = store.delete(id);
       request.onsuccess = () => resolve();

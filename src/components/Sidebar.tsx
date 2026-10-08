@@ -28,7 +28,8 @@ interface SidebarProps {
   onDeleteSession: (sessionId: string) => void;
   onRestoreSession?: (sessionId: string) => void;
   onHardDeleteSession?: (sessionId: string) => void;
-  onCreateFolder: (name: string, color: string) => void;
+  onCreateFolder: (name: string, color: string) => void | Promise<void>;
+  onOpenCreateFolderModal?: () => void;
   onDeleteFolder: (folderId: string) => void;
   onUpdateSettings: (newSettings: Partial<AppSettings>) => void;
   onExportStandaloneHtml: () => void;
@@ -50,6 +51,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onRestoreSession,
   onHardDeleteSession,
   onCreateFolder,
+  onOpenCreateFolderModal,
   onDeleteFolder,
   onUpdateSettings,
   onExportStandaloneHtml,
@@ -62,12 +64,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [newFolderColor, setNewFolderColor] = useState('#10B981');
   const audioImportInputRef = React.useRef<HTMLInputElement | null>(null);
 
-  const handleAddFolderSubmit = (e: React.FormEvent) => {
+  const handleAddFolderSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newFolderName.trim()) return;
-    onCreateFolder(newFolderName.trim(), newFolderColor);
-    setNewFolderName('');
-    setIsAddingFolder(false);
+    try {
+      await onCreateFolder(newFolderName.trim(), newFolderColor);
+      setNewFolderName('');
+      setIsAddingFolder(false);
+    } catch (err) {
+      console.error('Folder add error:', err);
+    }
   };
 
   // Split active sessions vs soft-deleted sessions
@@ -134,7 +140,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
               Folders
             </span>
             <button
-              onClick={() => setIsAddingFolder(!isAddingFolder)}
+              onClick={() => {
+                if (onOpenCreateFolderModal) {
+                  onOpenCreateFolderModal();
+                } else {
+                  setIsAddingFolder(!isAddingFolder);
+                }
+              }}
               className="text-stone-500 hover:text-stone-800 dark:hover:text-stone-200 text-xs cursor-pointer"
               title="Add Folder"
             >

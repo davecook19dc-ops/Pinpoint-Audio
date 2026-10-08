@@ -46,14 +46,33 @@ export interface Folder {
   id: string;
   name: string;
   color: string;
+  createdAt?: number;
+  isDeleted?: boolean;
 }
 
 export type ThemeMode = 'light' | 'dark' | 'sepia';
 export type FontMode = 'standard' | 'dyslexic';
+export type ReadingFont = 'sans' | 'serif' | 'mono' | 'dyslexic';
+export type MainNavView = 'folders' | 'all-recordings' | 'downloads' | 'import-export';
+
+export interface DownloadRecord {
+  id: string;
+  sessionId?: string;
+  title: string;
+  format: 'webm' | 'mp3' | 'md' | 'html' | 'json';
+  fileName: string;
+  timestamp: number;
+  sizeBytes?: number;
+  status: 'completed' | 'in-progress' | 'failed';
+}
 
 export interface AppSettings {
   theme: ThemeMode;
   fontMode: FontMode;
+  readingFont?: ReadingFont;
+  uiScale?: number;
+  highContrast?: boolean;
+  reducedMotion?: boolean;
   playbackRate: number;
   volume: number;
   isAudioEnhanced?: boolean;

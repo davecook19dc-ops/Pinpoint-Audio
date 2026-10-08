@@ -25,7 +25,8 @@ interface DashboardViewProps {
   storageUsage: { usedBytes: number; quotaBytes: number; percentage: number };
   onSelectFolder: (folderId: string | null | 'bin') => void;
   onOpenSession: (sessionId: string) => void;
-  onCreateFolder: (name: string, color: string) => void;
+  onCreateFolder: (name: string, color: string) => void | Promise<void>;
+  onOpenCreateFolderModal?: () => void;
   onDeleteFolder: (folderId: string) => void;
   onCreateSessionInFolder: (folderId: string) => void;
   onDeleteSession: (sessionId: string) => void;
@@ -66,6 +67,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   onSelectFolder,
   onOpenSession,
   onCreateFolder,
+  onOpenCreateFolderModal,
   onDeleteFolder,
   onCreateSessionInFolder,
   onDeleteSession,
@@ -128,12 +130,16 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     '#F97316', // Bright Coral
   ];
 
-  const handleCreateFolderSubmit = (e: React.FormEvent) => {
+  const handleCreateFolderSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newFolderName.trim()) return;
-    onCreateFolder(newFolderName.trim(), newFolderColor);
-    setNewFolderName('');
-    setIsCreatingFolder(false);
+    try {
+      await onCreateFolder(newFolderName.trim(), newFolderColor);
+      setNewFolderName('');
+      setIsCreatingFolder(false);
+    } catch (err) {
+      console.error('Folder create error:', err);
+    }
   };
 
   const handleUploadAudioChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -572,7 +578,13 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </button>
 
           <button
-            onClick={() => setIsCreatingFolder(true)}
+            onClick={() => {
+              if (onOpenCreateFolderModal) {
+                onOpenCreateFolderModal();
+              } else {
+                setIsCreatingFolder(true);
+              }
+            }}
             className="py-2 px-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer"
           >
             <Plus className="w-4 h-4" />
@@ -748,7 +760,13 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </form>
         ) : (
           <button
-            onClick={() => setIsCreatingFolder(true)}
+            onClick={() => {
+              if (onOpenCreateFolderModal) {
+                onOpenCreateFolderModal();
+              } else {
+                setIsCreatingFolder(true);
+              }
+            }}
             className="group rounded-2xl border-2 border-dashed border-[#e0d9cf] dark:border-stone-800 hover:border-indigo-500 dark:hover:border-indigo-400 p-6 flex flex-col items-center justify-center text-center transition-all bg-[#faf8f5]/60 dark:bg-stone-900/30 hover:bg-indigo-50/20 dark:hover:bg-indigo-950/10 cursor-pointer min-h-[160px]"
           >
             <div className="w-10 h-10 rounded-xl bg-white dark:bg-stone-800 border border-[#e8e4dc] dark:border-stone-700 text-stone-600 group-hover:bg-indigo-600 group-hover:text-white flex items-center justify-center mb-2.5 transition-colors shadow-2xs">

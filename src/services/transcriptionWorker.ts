@@ -74,8 +74,20 @@ self.addEventListener('message', async (event: MessageEvent) => {
 
       console.log('Model loaded on:', transcriber.device || 'wasm');
 
+      // Audio cleaning before model ingestion: dynamic range normalization (-1.0 dBFS)
+      const maxPeak = float32Array.reduce((max, s) => Math.max(max, Math.abs(s)), 0);
+      let cleanedArray = float32Array;
+      if (maxPeak > 1e-4) {
+        const targetPeak = Math.pow(10, -1.0 / 20); // ~0.89125 (-1.0 dBFS)
+        const gain = targetPeak / maxPeak;
+        cleanedArray = new Float32Array(float32Array.length);
+        for (let i = 0; i < float32Array.length; i++) {
+          cleanedArray[i] = Math.max(-1.0, Math.min(1.0, float32Array[i] * gain));
+        }
+      }
+
       // Calculate total audio duration in seconds (16,000 samples per second)
-      const totalDuration = Math.max(0.1, float32Array.length / 16000);
+      const totalDuration = Math.max(0.1, cleanedArray.length / 16000);
       const startTime = performance.now();
 
       self.postMessage({
@@ -84,23 +96,67 @@ self.addEventListener('message', async (event: MessageEvent) => {
         message: 'Transcribing speech to text with Moonshine...',
       });
 
+      // Strided sliding window chunking:
+      // 30s slice with 1.5s overlap between consecutive slices (stride = 28.5s)
       const chunkDuration = 30; // 30 seconds
+      const strideDuration = 28.5; // 28.5 seconds stride (1.5s overlap)
       const sampleRate = 16000;
-      const stepSamples = chunkDuration * sampleRate;
-      const estimatedTotalChunks = Math.ceil(float32Array.length / stepSamples);
+      const chunkSamples = Math.round(chunkDuration * sampleRate);
+      const strideSamples = Math.round(strideDuration * sampleRate);
 
-      let results: string[] = [];
+      const estimatedTotalChunks = Math.max(
+        1,
+        cleanedArray.length <= chunkSamples
+          ? 1
+          : Math.ceil((cleanedArray.length - chunkSamples) / strideSamples) + 1
+      );
+
+      // Boundary deduplication trim helper
+      const mergeWithDeduplication = (prevText: string, nextText: string): string => {
+        if (!prevText || !prevText.trim()) return (nextText || '').trim();
+        if (!nextText || !nextText.trim()) return prevText.trim();
+
+        const prevWords = prevText.trim().split(/\s+/);
+        const nextWords = nextText.trim().split(/\s+/);
+        const clean = (w: string) => w.toLowerCase().replace(/[^a-z0-9]/gi, '');
+
+        // Search for repeating boundary overlap up to 8 words
+        const maxCheck = Math.min(8, prevWords.length, nextWords.length);
+        let bestOverlap = 0;
+
+        for (let k = maxCheck; k >= 1; k--) {
+          const tail = prevWords.slice(-k).map(clean);
+          const head = nextWords.slice(0, k).map(clean);
+          if (tail.length === head.length && tail.every((w, i) => w === head[i] && w.length > 0)) {
+            bestOverlap = k;
+            break;
+          }
+        }
+
+        if (bestOverlap > 0) {
+          const trimmedNext = nextWords.slice(bestOverlap).join(' ');
+          return trimmedNext ? `${prevText.trim()} ${trimmedNext}` : prevText.trim();
+        }
+
+        return `${prevText.trim()} ${nextText.trim()}`;
+      };
+
+      let accumulatedText = '';
       let processedChunks = 0;
       const { language, task, chunk_length_s, stride_length_s, chunk_callback, ...cleanOptions } = options || {};
 
-      for (let start = 0; start < float32Array.length; start += stepSamples) {
-        const end = Math.min(float32Array.length, start + stepSamples);
-        const chunkArray = float32Array.slice(start, end);
+      for (let start = 0; start < cleanedArray.length; start += strideSamples) {
+        const end = Math.min(cleanedArray.length, start + chunkSamples);
+        const chunkArray = cleanedArray.slice(start, end);
 
-        // Run model on the small 30-second slice
+        // Run model on the 30-second slice
         const output = await transcriber(chunkArray, cleanOptions);
-        const text = Array.isArray(output) ? output[0]?.text : (output?.text || (typeof output === 'string' ? output : ''));
-        if (text) results.push(text.trim());
+        const rawChunkText = Array.isArray(output) ? output[0]?.text : (output?.text || (typeof output === 'string' ? output : ''));
+        const chunkText = (rawChunkText || '').trim();
+
+        if (chunkText) {
+          accumulatedText = mergeWithDeduplication(accumulatedText, chunkText);
+        }
 
         processedChunks++;
         const elapsedSeconds = (performance.now() - startTime) / 1000;
@@ -109,19 +165,24 @@ self.addEventListener('message', async (event: MessageEvent) => {
         // Report progress to the UI
         self.postMessage({
           type: 'inference_progress',
-          percent: Math.round((processedChunks / estimatedTotalChunks) * 100),
+          percent: Math.min(100, Math.round((processedChunks / estimatedTotalChunks) * 100)),
           chunkIndex: processedChunks,
           totalChunks: estimatedTotalChunks,
           processedSeconds: Math.round(end / sampleRate),
           totalDuration: Math.round(totalDuration),
           elapsedSeconds: Math.round(elapsedSeconds),
-          estimatedTimeRemaining: Math.round((estimatedTotalChunks - processedChunks) * timePerChunk),
+          estimatedTimeRemaining: Math.max(0, Math.round((estimatedTotalChunks - processedChunks) * timePerChunk)),
           message: `Processing chunk ${processedChunks} of ${estimatedTotalChunks}...`,
         });
+
+        // Break if we've reached or exceeded end of audio
+        if (end >= cleanedArray.length) {
+          break;
+        }
       }
 
-      // Join all chunks together into the final string
-      const normalizedResult = { text: results.join(' ') };
+      // Final normalized transcript
+      const normalizedResult = { text: accumulatedText.trim() };
 
       const totalElapsed = Math.round((performance.now() - startTime) / 1000);
       self.postMessage({

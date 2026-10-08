@@ -15,8 +15,44 @@
   line-height: 1.65;
 }
 
-.font-standard {
+.font-standard,
+.font-sans {
   font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+}
+
+.font-serif {
+  font-family: Georgia, Cambria, 'Times New Roman', Times, serif;
+}
+
+.font-mono {
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+/* High Contrast mode */
+.high-contrast {
+  --tw-border-opacity: 1;
+}
+.high-contrast button,
+.high-contrast input,
+.high-contrast select,
+.high-contrast div[class*="border"] {
+  border-width: 1.5px !important;
+  border-color: #52525b !important;
+}
+.dark.high-contrast button,
+.dark.high-contrast input,
+.dark.high-contrast div[class*="border"] {
+  border-color: #a1a1aa !important;
+}
+
+/* Reduced Motion mode */
+.reduced-motion *,
+.reduced-motion *::before,
+.reduced-motion *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
 }
 
 /* Sepia Theme Global Adaptations */

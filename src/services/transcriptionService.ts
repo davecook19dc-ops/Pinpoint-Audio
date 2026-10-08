@@ -1,4 +1,5 @@
 // src/services/transcriptionService.ts - Service for running local Whisper speech-to-text in a Web Worker
+import { preProcessAudioForTranscription, normalizeAudioBuffer } from '../utils/audio';
 
 export interface TranscriptionChunk {
   timestamp: [number, number]; // [startSec, endSec]
@@ -59,7 +60,8 @@ class TranscriptionService {
     // If native decodeAudioData delivered 16kHz, extract channel 0 directly
     if (decodedBuffer.sampleRate === 16000) {
       const channel0 = decodedBuffer.getChannelData(0);
-      return new Float32Array(channel0);
+      const raw = new Float32Array(channel0);
+      return preProcessAudioForTranscription(raw, 16000);
     }
 
     // Safety fallback: if the browser ignored the constructor sampleRate,
@@ -74,7 +76,8 @@ class TranscriptionService {
 
     const renderedBuffer = await offlineCtx.startRendering();
     const channel0 = renderedBuffer.getChannelData(0);
-    return new Float32Array(channel0);
+    const raw = new Float32Array(channel0);
+    return preProcessAudioForTranscription(raw, 16000);
   }
 
   /**
