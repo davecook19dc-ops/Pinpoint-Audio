@@ -1,36 +1,34 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
   <defs>
-    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#4F46E5" />
-      <stop offset="100%" stop-color="#6366F1" />
+    <linearGradient id="pinGradH" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#3AC9FD" />
+      <stop offset="50%" stop-color="#0F73EE" />
+      <stop offset="100%" stop-color="#0237C3" />
     </linearGradient>
-    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
-      <feDropShadow dx="0" dy="12" stdDeviation="16" flood-color="#312E81" flood-opacity="0.35"/>
+    <linearGradient id="waveGradH" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#3AC9FD" />
+      <stop offset="100%" stop-color="#0D5AD3" />
+    </linearGradient>
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="8" stdDeviation="16" flood-color="#0F73EE" flood-opacity="0.4"/>
     </filter>
   </defs>
-  <!-- Background with subtle squircle -->
-  <rect width="512" height="512" rx="128" fill="url(#bgGrad)" />
-  
-  <!-- Headphones arc -->
-  <path d="M140 260 C140 160, 210 110, 256 110 C302 110, 372 160, 372 260" fill="none" stroke="#FFFFFF" stroke-width="28" stroke-linecap="round" filter="url(#shadow)" />
-  
-  <!-- Left Ear Cup -->
-  <rect x="116" y="240" width="48" height="96" rx="24" fill="#FFFFFF" filter="url(#shadow)" />
-  <rect x="128" y="256" width="24" height="64" rx="12" fill="#E0E7FF" />
-  
-  <!-- Right Ear Cup -->
-  <rect x="348" y="240" width="48" height="96" rx="24" fill="#FFFFFF" filter="url(#shadow)" />
-  <rect x="360" y="256" width="24" height="64" rx="12" fill="#E0E7FF" />
+  <!-- Background squircle -->
+  <rect width="512" height="512" rx="128" fill="#0B132B" />
 
-  <!-- Center Pinpoint & Audio Waveform Element -->
-  <!-- Note Pin Marker -->
-  <circle cx="256" cy="250" r="44" fill="#FBBF24" filter="url(#shadow)" />
-  <circle cx="256" cy="250" r="22" fill="#FFFFFF" />
-  <path d="M256 294 L256 360" stroke="#FBBF24" stroke-width="12" stroke-linecap="round" />
-  
-  <!-- Audio wave pulses below -->
-  <line x1="200" y1="340" x2="200" y2="380" stroke="#A7F3D0" stroke-width="10" stroke-linecap="round" />
-  <line x1="228" y1="320" x2="228" y2="400" stroke="#A7F3D0" stroke-width="10" stroke-linecap="round" />
-  <line x1="284" y1="320" x2="284" y2="400" stroke="#A7F3D0" stroke-width="10" stroke-linecap="round" />
-  <line x1="312" y1="340" x2="312" y2="380" stroke="#A7F3D0" stroke-width="10" stroke-linecap="round" />
+  <g transform="translate(100, 72)" filter="url(#glow)">
+    <path
+      d="M156,22 C236,22 296,82 296,162 C296,192 284,216 270,230 L270,230 C264,236 262,240 252,246 C240,254 232,258 206,284 L164,324 C160,328 152,328 148,324 L106,284 C80,258 72,254 60,246 C50,240 48,236 42,230 L42,230 C28,216 16,192 16,162 C16,82 76,22 156,22 Z"
+      fill="none"
+      stroke="url(#pinGradH)"
+      stroke-width="26"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+    />
+    <line x1="92" y1="138" x2="92" y2="186" stroke="url(#waveGradH)" stroke-width="20" stroke-linecap="round" />
+    <line x1="124" y1="116" x2="124" y2="208" stroke="url(#waveGradH)" stroke-width="20" stroke-linecap="round" />
+    <line x1="156" y1="92" x2="156" y2="232" stroke="url(#waveGradH)" stroke-width="20" stroke-linecap="round" />
+    <line x1="188" y1="116" x2="188" y2="208" stroke="url(#waveGradH)" stroke-width="20" stroke-linecap="round" />
+    <line x1="220" y1="138" x2="220" y2="186" stroke="url(#waveGradH)" stroke-width="20" stroke-linecap="round" />
+  </g>
 </svg>

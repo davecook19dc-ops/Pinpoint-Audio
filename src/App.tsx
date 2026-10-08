@@ -15,10 +15,10 @@ import { ConfirmDeleteModal } from './components/ConfirmDeleteModal';
 import { PWAInstallButton } from './components/PWAInstallButton';
 import { SyncPanel } from './components/SyncPanel';
 import { OnboardingWarning } from './components/OnboardingWarning';
+import { BrandLogo } from './components/BrandLogo';
 import {
   Menu,
   Plus,
-  Headphones,
   Sparkles,
   Check,
   AlertCircle,
@@ -1493,16 +1493,7 @@ export default function App() {
               <span>Back to Folders</span>
             </button>
           ) : (
-            <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-xl bg-indigo-600 flex items-center justify-center text-white shadow-2xs">
-                <Headphones className="w-4 h-4" />
-              </div>
-              <div>
-                <span className="text-base font-bold tracking-tight text-stone-900 dark:text-white leading-tight">
-                  Pinpoint Audio
-                </span>
-              </div>
-            </div>
+            <BrandLogo size="sm" />
           )}
 
           {currentView === 'workspace' && (

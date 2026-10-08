@@ -4,7 +4,6 @@ import {
   Trash2,
   Type,
   FileCode,
-  Headphones,
   Palette,
   Layers,
   Keyboard,
@@ -14,6 +13,7 @@ import {
 } from 'lucide-react';
 import { AppSettings, Folder, Session, ThemeMode } from '../types';
 import { PWAInstallButton } from './PWAInstallButton';
+import { BrandLogo } from './BrandLogo';
 
 interface SidebarProps {
   folders: Folder[];
@@ -88,16 +88,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     <aside className="w-72 md:w-80 h-full flex flex-col bg-[#fcfbf9] dark:bg-stone-900 border-r border-[#e8e4dc] dark:border-stone-800 select-none">
       {/* Brand Header */}
       <div className="p-4 border-b border-[#e8e4dc] dark:border-stone-800 flex items-center justify-between">
-        <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-xl bg-indigo-600 flex items-center justify-center text-white shadow-2xs">
-            <Headphones className="w-4 h-4" />
-          </div>
-          <div>
-            <h1 className="text-sm font-bold tracking-tight text-stone-900 dark:text-white leading-none">
-              Pinpoint Audio
-            </h1>
-          </div>
-        </div>
+        <BrandLogo size="sm" />
 
         <div className="flex items-center gap-1.5">
           {/* Import Audio Action */}
