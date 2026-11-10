@@ -1864,6 +1864,11 @@ export default function App() {
               }}
               onExportNotes={handleExportNotes}
               onShowToast={showToast}
+              onInsertToNotes={async (markdownQuote) => {
+                if (!currentSessionId) return;
+                await handleAddNote(markdownQuote.trim(), Math.round(currentTime), 'note');
+                showToast('Quotation added to notes!');
+              }}
             />
           </div>
 

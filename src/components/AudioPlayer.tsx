@@ -37,6 +37,7 @@ import { exportSessionToMarkdown, generateMarkdownString, hasSessionExportableCo
 import { checkWebGPUSupport } from '../utils/webgpu';
 import { speechService } from '../services/speechService';
 import { fileSystemService } from '../services/fileSystemService';
+import { TranscriptView } from './TranscriptView';
 
 interface AudioPlayerProps {
   currentSession: Session | null;
@@ -85,6 +86,7 @@ interface AudioPlayerProps {
   onDiscardAudio?: () => void;
   onExportNotes?: (session: Session) => void;
   onShowToast?: (msg: string) => void;
+  onInsertToNotes?: (markdownQuote: string) => void;
 }
 
 export const AudioPlayer: React.FC<AudioPlayerProps> = ({
@@ -122,7 +124,11 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
   onDiscardAudio,
   onExportNotes,
   onShowToast,
+  onInsertToNotes,
 }) => {
+  // Bottom tab switcher: Timeline markers vs Synchronized Interactive Transcript
+  const [bottomTab, setBottomTab] = useState<'markers' | 'transcript'>('markers');
+
   // Session Title inline editing state
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [titleInput, setTitleInput] = useState(currentSession?.title || '');
@@ -1585,45 +1591,84 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
         </button>
       </div>
 
-      {/* Notes Markers Overview on this track */}
+      {/* Track Details: Timeline Markers vs Interactive Synchronized Transcript */}
       <div className="flex-1 flex flex-col min-h-0">
-        <div className="flex items-center justify-between mb-2">
-          <span className="text-xs font-semibold uppercase tracking-wider text-neutral-500 dark:text-neutral-400">
-            Timeline Markers ({notes.length})
-          </span>
+        <div className="flex items-center justify-between mb-2 shrink-0">
+          <div className="flex items-center gap-1 bg-[#edeae3]/80 dark:bg-stone-800/80 p-0.5 rounded-lg border border-[#e8e4dc] dark:border-stone-700/60">
+            <button
+              type="button"
+              onClick={() => setBottomTab('markers')}
+              className={`px-2 py-0.5 rounded-md text-[11px] font-semibold transition-colors cursor-pointer flex items-center gap-1 ${
+                bottomTab === 'markers'
+                  ? 'bg-white dark:bg-stone-900 text-stone-900 dark:text-stone-100 shadow-2xs'
+                  : 'text-stone-500 hover:text-stone-800 dark:hover:text-stone-200'
+              }`}
+            >
+              <span>Markers</span>
+              <span className="text-[10px] px-1 py-0.2 rounded-full bg-stone-100 dark:bg-stone-800 text-stone-600 dark:text-stone-400 font-mono">
+                {notes.length}
+              </span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setBottomTab('transcript')}
+              className={`px-2 py-0.5 rounded-md text-[11px] font-semibold transition-colors cursor-pointer flex items-center gap-1 ${
+                bottomTab === 'transcript'
+                  ? 'bg-white dark:bg-stone-900 text-sky-600 dark:text-sky-400 shadow-2xs'
+                  : 'text-stone-500 hover:text-stone-800 dark:hover:text-stone-200'
+              }`}
+            >
+              <span>Transcript</span>
+              {currentSession?.chunks && currentSession.chunks.length > 0 && (
+                <span className="w-1.5 h-1.5 rounded-full bg-sky-500" />
+              )}
+            </button>
+          </div>
           <span className="text-[11px] text-neutral-400">Click to jump</span>
         </div>
 
-        {notes.length === 0 ? (
-          <div className="p-4 rounded-xl border border-dashed border-neutral-300 dark:border-neutral-800 text-center text-xs text-neutral-500 dark:text-neutral-400">
-            No notes added to this timeline yet.
-            <div className="mt-1 text-[11px] text-neutral-400">
-              Press <kbd className="px-1 bg-neutral-200 dark:bg-neutral-800 rounded">Ctrl+M</kbd> to add a timestamped note.
+        {bottomTab === 'markers' ? (
+          notes.length === 0 ? (
+            <div className="p-4 rounded-xl border border-dashed border-neutral-300 dark:border-neutral-800 text-center text-xs text-neutral-500 dark:text-neutral-400">
+              No notes added to this timeline yet.
+              <div className="mt-1 text-[11px] text-neutral-400">
+                Press <kbd className="px-1 bg-neutral-200 dark:bg-neutral-800 rounded">Ctrl+M</kbd> to add a timestamped note.
+              </div>
             </div>
-          </div>
+          ) : (
+            <div className="space-y-1.5 overflow-y-auto pr-1 flex-1">
+              {notes.map((n) => {
+                const isCurrent = Math.abs(currentTime - n.timestamp) < 2.5;
+                return (
+                  <button
+                    key={n.id}
+                    onClick={() => onSeek(n.timestamp)}
+                    className={`w-full text-left p-2 rounded-lg text-xs flex items-start gap-2.5 transition-colors cursor-pointer border ${
+                      isCurrent
+                        ? 'bg-indigo-50/80 dark:bg-indigo-950/40 border-indigo-200 dark:border-indigo-800'
+                        : 'hover:bg-neutral-100 dark:hover:bg-neutral-800 border-transparent'
+                    }`}
+                  >
+                    <span className="font-mono text-[11px] font-semibold text-indigo-600 dark:text-indigo-400 bg-neutral-100 dark:bg-neutral-800 px-1.5 py-0.5 rounded shrink-0 tabular-nums">
+                      {formatTime(n.timestamp)}
+                    </span>
+                    <span className="text-neutral-700 dark:text-neutral-300 truncate text-[11px]">
+                      {n.content}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          )
         ) : (
-          <div className="space-y-1.5 overflow-y-auto pr-1 flex-1">
-            {notes.map((n) => {
-              const isCurrent = Math.abs(currentTime - n.timestamp) < 2.5;
-              return (
-                <button
-                  key={n.id}
-                  onClick={() => onSeek(n.timestamp)}
-                  className={`w-full text-left p-2 rounded-lg text-xs flex items-start gap-2.5 transition-colors cursor-pointer border ${
-                    isCurrent
-                      ? 'bg-indigo-50/80 dark:bg-indigo-950/40 border-indigo-200 dark:border-indigo-800'
-                      : 'hover:bg-neutral-100 dark:hover:bg-neutral-800 border-transparent'
-                  }`}
-                >
-                  <span className="font-mono text-[11px] font-semibold text-indigo-600 dark:text-indigo-400 bg-neutral-100 dark:bg-neutral-800 px-1.5 py-0.5 rounded shrink-0 tabular-nums">
-                    {formatTime(n.timestamp)}
-                  </span>
-                  <span className="text-neutral-700 dark:text-neutral-300 truncate text-[11px]">
-                    {n.content}
-                  </span>
-                </button>
-              );
-            })}
+          <div className="flex-1 overflow-y-auto pr-1 min-h-0 bg-[#faf8f5]/50 dark:bg-stone-950/30 rounded-xl p-2 border border-[#e8e4dc]/60 dark:border-stone-800/60">
+            <TranscriptView
+              chunks={currentSession?.chunks || []}
+              currentTime={currentTime}
+              onSeek={onSeek}
+              onInsertToNotes={onInsertToNotes}
+              speakerMapping={currentSession?.speakerMapping}
+            />
           </div>
         )}
       </div>

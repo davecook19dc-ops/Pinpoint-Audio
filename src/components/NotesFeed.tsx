@@ -37,6 +37,7 @@ import { SlidesViewer } from './SlidesViewer';
 import { KeyPointsPanel } from './KeyPointsPanel';
 import { diarizeTranscriptWithAI } from '../services/aiService';
 import { formatTranscriptMarkdown } from '../services/exportService';
+import { TranscriptView } from './TranscriptView';
 
 export const SPEAKER_COLOR_MAP: Record<
   string,
@@ -387,6 +388,7 @@ export const NotesFeed: React.FC<NotesFeedProps> = ({
   const [diarizeToast, setDiarizeToast] = useState<string | null>(null);
   const [renamingSpeakerId, setRenamingSpeakerId] = useState<string | null>(null);
   const [renameSpeakerValue, setRenameSpeakerValue] = useState<string>('');
+  const [transcriptLayout, setTranscriptLayout] = useState<'paragraphs' | 'slices'>('paragraphs');
 
   // Collect all unique speakers across current session chunks
   const allKnownSpeakers = useMemo(() => {
@@ -994,6 +996,34 @@ export const NotesFeed: React.FC<NotesFeedProps> = ({
 
               {currentSession?.transcript && (
                 <div className="flex items-center gap-1.5 shrink-0 flex-wrap justify-end">
+                  {/* View layout toggle: Paragraphs vs Slices */}
+                  <div className="flex items-center bg-[#edeae3]/80 dark:bg-stone-800/80 p-0.5 rounded-xl border border-[#e8e4dc] dark:border-stone-700/60 shadow-2xs">
+                    <button
+                      type="button"
+                      onClick={() => setTranscriptLayout('paragraphs')}
+                      title="Timestamp-Anchored Interactive Paragraphs with Playback Sync"
+                      className={`px-2 py-0.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+                        transcriptLayout === 'paragraphs'
+                          ? 'bg-white dark:bg-stone-900 text-sky-600 dark:text-sky-400 shadow-2xs'
+                          : 'text-stone-500 hover:text-stone-800 dark:hover:text-stone-200'
+                      }`}
+                    >
+                      Paragraphs
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setTranscriptLayout('slices')}
+                      title="Detailed Slice Editor"
+                      className={`px-2 py-0.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+                        transcriptLayout === 'slices'
+                          ? 'bg-white dark:bg-stone-900 text-stone-900 dark:text-stone-100 shadow-2xs'
+                          : 'text-stone-500 hover:text-stone-800 dark:hover:text-stone-200'
+                      }`}
+                    >
+                      Slices
+                    </button>
+                  </div>
+
                   {/* Format with Speaker Labels Button */}
                   <button
                     onClick={handleFormatWithSpeakerLabels}
@@ -1177,7 +1207,25 @@ export const NotesFeed: React.FC<NotesFeedProps> = ({
 
                 {/* Parsed Interactive Segments or Chunks */}
                 <div className="space-y-2">
-                  {currentSession.chunks && currentSession.chunks.length > 0 ? (
+                  {transcriptLayout === 'paragraphs' ? (
+                    <TranscriptView
+                      chunks={
+                        currentSession.chunks && currentSession.chunks.length > 0
+                          ? currentSession.chunks
+                          : getParsedTranscriptSegments(currentSession.transcript).map((seg) => ({
+                              timestamp: [seg.timestamp, seg.timestamp + 2],
+                              text: seg.text,
+                              speaker: seg.speaker,
+                            }))
+                      }
+                      currentTime={currentTime}
+                      onSeek={onSeek}
+                      onInsertToNotes={(quote) =>
+                        handleTransferSnippet(quote, currentTime, 'note')
+                      }
+                      speakerMapping={currentSession.speakerMapping}
+                    />
+                  ) : currentSession.chunks && currentSession.chunks.length > 0 ? (
                     currentSession.chunks.map((chunk, idx) => (
                       <TranscriptChunkItem
                         key={`chunk-${idx}`}
