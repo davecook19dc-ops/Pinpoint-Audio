@@ -63,7 +63,7 @@ export const TranscriptView: React.FC<TranscriptViewProps> = ({
   }
 
   return (
-    <div className={`flex flex-col gap-3 py-2 px-1 max-w-3xl mx-auto ${className}`}>
+    <div className={`space-y-4 py-2 px-1 max-w-3xl mx-auto ${className}`}>
       {paragraphs.map((para) => {
         const isActive = currentTime >= para.startTime && currentTime < para.endTime;
         const speakerKey = para.speaker || 'Speaker 1';
@@ -73,13 +73,13 @@ export const TranscriptView: React.FC<TranscriptViewProps> = ({
           <div
             key={para.id}
             ref={isActive ? activeElementRef : null}
-            className={`group relative flex gap-4 p-3.5 rounded-xl transition-all border ${
+            className={`group relative flex items-start gap-4 p-3.5 rounded-xl transition-all border mb-4 ${
               isActive
                 ? 'bg-sky-50/80 dark:bg-sky-950/40 border-sky-300 dark:border-sky-800 shadow-sm ring-1 ring-sky-300/40 dark:ring-sky-800/40'
                 : 'bg-white dark:bg-slate-900/60 border-slate-100 dark:border-slate-800/80 hover:border-slate-200 dark:hover:border-slate-700'
             }`}
           >
-            {/* Left Timestamp & Speaker Badge */}
+            {/* Left Timestamp & Speaker Badge (anchored at top-left) */}
             <div className="flex flex-col items-start gap-1 shrink-0 w-24">
               <button
                 type="button"
@@ -106,7 +106,7 @@ export const TranscriptView: React.FC<TranscriptViewProps> = ({
             <div className="flex-1 min-w-0 flex flex-col gap-1">
               <p
                 onClick={() => onSeek(para.startTime)}
-                className="text-sm leading-relaxed text-slate-800 dark:text-slate-200 select-text cursor-pointer hover:text-slate-900 dark:hover:text-white"
+                className="text-[14px] leading-relaxed tracking-normal text-slate-700 dark:text-slate-200 select-text cursor-pointer hover:text-slate-900 dark:hover:text-white"
               >
                 {para.text}
               </p>
