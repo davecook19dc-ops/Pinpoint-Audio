@@ -1209,15 +1209,8 @@ export const NotesFeed: React.FC<NotesFeedProps> = ({
                 <div className="space-y-2">
                   {transcriptLayout === 'paragraphs' ? (
                     <TranscriptView
-                      chunks={
-                        currentSession.chunks && currentSession.chunks.length > 0
-                          ? currentSession.chunks
-                          : getParsedTranscriptSegments(currentSession.transcript).map((seg) => ({
-                              timestamp: [seg.timestamp, seg.timestamp + 2],
-                              text: seg.text,
-                              speaker: seg.speaker,
-                            }))
-                      }
+                      chunks={currentSession.chunks}
+                      rawTranscript={currentSession.transcript}
                       currentTime={currentTime}
                       onSeek={onSeek}
                       onInsertToNotes={(quote) =>

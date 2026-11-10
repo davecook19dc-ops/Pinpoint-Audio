@@ -1,35 +1,41 @@
-// src/components/TranscriptView.tsx - Timestamp-Anchored Interactive Transcript Viewer with Synchronized Playback
+// src/components/TranscriptView.tsx - Timestamp-Anchored Interactive Transcript Viewer with Punctuation-Agnostic Cards
 import React, { useMemo, useEffect, useRef, useState } from 'react';
-import { TranscriptionChunk } from '../types';
-import { groupChunksIntoParagraphs, formatSecondsToTime, FormattedParagraph } from '../utils/transcriptUtils';
-import { Play, Copy, Check, Quote } from 'lucide-react';
+import { Play, Plus, Copy, Check } from 'lucide-react';
+import { TranscriptionChunk, SpeakerMapping } from '../types';
+import { formatSecondsToTime, groupChunksIntoParagraphs, FormattedParagraph } from '../utils/transcriptUtils';
 
 export interface TranscriptViewProps {
-  chunks: TranscriptionChunk[];
+  chunks?: TranscriptionChunk[];
+  rawTranscript?: string;
   currentTime: number;
   onSeek: (timeInSeconds: number) => void;
   onInsertToNotes?: (markdownQuote: string) => void;
-  speakerMapping?: Record<string, string>;
+  speakerMapping?: SpeakerMapping;
   autoScroll?: boolean;
-  className?: string;
 }
 
 export const TranscriptView: React.FC<TranscriptViewProps> = ({
   chunks,
+  rawTranscript,
   currentTime,
   onSeek,
   onInsertToNotes,
   speakerMapping,
   autoScroll = true,
-  className = '',
 }) => {
-  const paragraphs = useMemo(() => groupChunksIntoParagraphs(chunks), [chunks]);
+  const paragraphs = useMemo(
+    () => groupChunksIntoParagraphs(chunks, rawTranscript),
+    [chunks, rawTranscript]
+  );
+
   const activeElementRef = useRef<HTMLDivElement | null>(null);
   const [copiedParaId, setCopiedParaId] = useState<string | null>(null);
 
-  // Identify currently active paragraph for auto-scrolling
+  // Active paragraph identification for synchronized auto-scrolling
   const activeParagraph = useMemo(() => {
-    return paragraphs.find((p) => currentTime >= p.startTime && currentTime < p.endTime);
+    return paragraphs.find(
+      (p) => currentTime >= p.startTime && currentTime <= p.endTime + 0.5
+    );
   }, [paragraphs, currentTime]);
 
   const activeParaId = activeParagraph?.id;
@@ -52,72 +58,67 @@ export const TranscriptView: React.FC<TranscriptViewProps> = ({
     });
   };
 
-  if (!chunks || chunks.length === 0) {
+  if (paragraphs.length === 0) {
     return (
-      <div className={`flex flex-col items-center justify-center p-8 text-center text-slate-400 dark:text-slate-500 ${className}`}>
-        <Quote className="w-8 h-8 mb-2 opacity-40" />
-        <p className="text-xs font-medium">No timestamped transcript chunks available.</p>
-        <p className="text-[11px] opacity-75 mt-0.5">Record audio or run transcription to generate speech-to-text.</p>
+      <div className="p-8 text-center text-xs text-stone-400">
+        No transcript lines to display.
       </div>
     );
   }
 
   return (
-    <div className={`space-y-4 py-2 px-1 max-w-3xl mx-auto ${className}`}>
+    <div className="flex flex-col gap-3.5 py-2 px-1 max-w-3xl mx-auto w-full select-text">
       {paragraphs.map((para) => {
-        const isActive = currentTime >= para.startTime && currentTime < para.endTime;
-        const speakerKey = para.speaker || 'Speaker 1';
-        const displayName = (speakerMapping && speakerMapping[speakerKey]) || speakerKey;
+        const isActive = currentTime >= para.startTime && currentTime <= para.endTime + 0.5;
+        const displayName =
+          (para.speaker && speakerMapping?.[para.speaker]) || para.speaker || 'Speaker';
 
         return (
           <div
             key={para.id}
             ref={isActive ? activeElementRef : null}
-            className={`group relative flex items-start gap-4 p-3.5 rounded-xl transition-all border mb-4 ${
+            className={`group flex items-start gap-3.5 p-4 rounded-2xl border transition-all ${
               isActive
-                ? 'bg-sky-50/80 dark:bg-sky-950/40 border-sky-300 dark:border-sky-800 shadow-sm ring-1 ring-sky-300/40 dark:ring-sky-800/40'
-                : 'bg-white dark:bg-slate-900/60 border-slate-100 dark:border-slate-800/80 hover:border-slate-200 dark:hover:border-slate-700'
+                ? 'bg-indigo-50/90 dark:bg-indigo-950/40 border-indigo-300 dark:border-indigo-800 shadow-xs'
+                : 'bg-white dark:bg-stone-900/70 border-stone-200/80 dark:border-stone-800 hover:border-stone-300 dark:hover:border-stone-700 shadow-2xs'
             }`}
           >
-            {/* Left Timestamp & Speaker Badge (anchored at top-left) */}
-            <div className="flex flex-col items-start gap-1 shrink-0 w-24">
+            {/* Left Timestamp & Speaker Badge */}
+            <div className="flex flex-col items-start gap-1 shrink-0 pt-0.5 select-none w-18 sm:w-20">
               <button
                 type="button"
                 onClick={() => onSeek(para.startTime)}
-                className={`font-mono text-xs font-semibold px-2 py-0.5 rounded transition-colors flex items-center gap-1 cursor-pointer ${
+                title={`Jump audio to ${formatSecondsToTime(para.startTime)}`}
+                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg font-mono text-[11px] font-bold transition-colors cursor-pointer shadow-2xs ${
                   isActive
-                    ? 'bg-sky-600 text-white shadow-xs'
-                    : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-sky-100 hover:text-sky-700 dark:hover:bg-sky-900'
+                    ? 'bg-indigo-600 text-white shadow-xs'
+                    : 'bg-stone-900 dark:bg-stone-100 text-white dark:text-stone-900 hover:bg-indigo-600 dark:hover:bg-indigo-500 dark:hover:text-white'
                 }`}
-                title="Jump audio to this timestamp"
               >
-                {isActive && <Play className="w-2.5 h-2.5 fill-current animate-pulse" />}
+                <Play className="w-2.5 h-2.5 fill-current" />
                 <span>{formatSecondsToTime(para.startTime)}</span>
               </button>
-              <span
-                className="text-[11px] font-medium text-slate-400 dark:text-slate-500 truncate max-w-full"
-                title={displayName}
-              >
+              <span className="text-[10px] font-bold text-stone-400 dark:text-stone-500 uppercase tracking-wider truncate max-w-full pl-0.5">
                 {displayName}
               </span>
             </div>
 
             {/* Right Text Content */}
-            <div className="flex-1 min-w-0 flex flex-col gap-1">
+            <div className="flex-1 min-w-0 pt-0.5">
               <p
                 onClick={() => onSeek(para.startTime)}
-                className="text-[14px] leading-relaxed tracking-normal text-slate-700 dark:text-slate-200 select-text cursor-pointer hover:text-slate-900 dark:hover:text-white"
+                className="text-xs sm:text-sm text-stone-800 dark:text-stone-200 leading-relaxed font-normal cursor-pointer hover:text-stone-950 dark:hover:text-white"
               >
                 {para.text}
               </p>
             </div>
 
-            {/* Hover Actions: Send to Notes & Copy Quote */}
-            <div className="flex items-center gap-1 self-start shrink-0">
+            {/* Hover Actions: Copy Quote & Insert to Notes */}
+            <div className="flex items-center gap-1 shrink-0 select-none">
               <button
                 type="button"
                 onClick={() => handleCopyQuote(para, displayName)}
-                className="opacity-0 group-hover:opacity-100 p-1.5 rounded text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-all text-xs cursor-pointer"
+                className="opacity-0 group-hover:opacity-100 p-1.5 rounded-lg hover:bg-stone-100 dark:hover:bg-stone-800 text-stone-400 hover:text-stone-700 dark:hover:text-stone-200 transition-all text-xs cursor-pointer"
                 title="Copy quotation markdown"
               >
                 {copiedParaId === para.id ? (
@@ -135,11 +136,10 @@ export const TranscriptView: React.FC<TranscriptViewProps> = ({
                       `> **[${formatSecondsToTime(para.startTime)}]** *${displayName}:* "${para.text}"\n\n`
                     )
                   }
-                  className="opacity-0 group-hover:opacity-100 p-1.5 rounded text-slate-400 hover:text-sky-600 hover:bg-sky-50 dark:hover:bg-slate-800 transition-all text-xs font-semibold cursor-pointer flex items-center gap-0.5"
-                  title="Add quotation to notes"
+                  title="Add as quote to notes feed"
+                  className="opacity-0 group-hover:opacity-100 p-1.5 rounded-lg hover:bg-stone-100 dark:hover:bg-stone-800 text-stone-400 hover:text-indigo-600 transition-all cursor-pointer shrink-0"
                 >
-                  <span>+</span>
-                  <span>Note</span>
+                  <Plus className="w-3.5 h-3.5" />
                 </button>
               )}
             </div>

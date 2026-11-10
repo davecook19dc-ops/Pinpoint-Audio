@@ -1663,7 +1663,8 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
         ) : (
           <div className="flex-1 overflow-y-auto pr-1 min-h-0 bg-[#faf8f5]/50 dark:bg-stone-950/30 rounded-xl p-2 border border-[#e8e4dc]/60 dark:border-stone-800/60">
             <TranscriptView
-              chunks={currentSession?.chunks || []}
+              chunks={currentSession?.chunks}
+              rawTranscript={currentSession?.transcript}
               currentTime={currentTime}
               onSeek={onSeek}
               onInsertToNotes={onInsertToNotes}

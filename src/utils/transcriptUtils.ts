@@ -1,105 +1,159 @@
-// src/utils/transcriptUtils.ts - Formatting and smart sentence-level paragraph splitting for timestamp-anchored interactive transcripts
+// src/utils/transcriptUtils.ts - Punctuation-agnostic paragraph chunker for timestamp-anchored interactive transcripts
 
 export interface FormattedParagraph {
   id: string;
-  speaker?: string;
+  speaker: string;
   startTime: number;
   endTime: number;
   text: string;
 }
 
 export function formatSecondsToTime(seconds: number): string {
-  if (typeof seconds !== 'number' || isNaN(seconds) || !isFinite(seconds) || seconds < 0) {
-    return '00:00';
-  }
+  if (typeof seconds !== 'number' || isNaN(seconds) || seconds < 0) return '00:00';
   const mins = Math.floor(seconds / 60);
   const secs = Math.floor(seconds % 60);
   return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
 }
 
-interface SentenceUnit {
-  text: string;
-  startTime: number;
-  endTime: number;
-  speaker?: string;
+function splitIntoThoughtUnits(text: string): string[] {
+  const clean = text.trim();
+  if (!clean) return [];
+
+  // Split by punctuation if available (. ! ?)
+  const punctuated = clean.match(/[^.!?]+[.!?]+(?:\s|$)|[^.!?]+$/g);
+  const units: string[] = [];
+
+  if (punctuated && punctuated.length > 1) {
+    for (const p of punctuated) {
+      const words = p.trim().split(/\s+/);
+      if (words.length > 25) {
+        for (let i = 0; i < words.length; i += 18) {
+          units.push(words.slice(i, i + 18).join(' '));
+        }
+      } else if (p.trim()) {
+        units.push(p.trim());
+      }
+    }
+  } else {
+    // Fallback for unpunctuated Moonshine Tiny output:
+    // Force slice into natural phrase lengths of ~16 words
+    const words = clean.split(/\s+/);
+    for (let i = 0; i < words.length; i += 16) {
+      const slice = words.slice(i, i + 16).join(' ');
+      if (slice.trim()) {
+        units.push(slice.trim());
+      }
+    }
+  }
+  return units;
 }
 
-/**
- * Breaks raw transcription chunks into individual sentences with interpolated timestamps,
- * then groups them into short, 2-3 sentence paragraphs (max ~45 words).
- */
 export function groupChunksIntoParagraphs(
-  chunks: { timestamp: [number, number]; text: string; speaker?: string }[]
+  chunks?: { timestamp: [number, number]; text: string; speaker?: string }[],
+  rawTranscript?: string
 ): FormattedParagraph[] {
-  if (!chunks || chunks.length === 0) return [];
+  const sourceChunks: { timestamp: [number, number]; text: string; speaker?: string }[] =
+    chunks && chunks.length > 0 ? [...chunks] : [];
 
-  const sentences: SentenceUnit[] = [];
+  // Fallback: parse rawTranscript string if structured chunks array is missing
+  if (sourceChunks.length === 0 && rawTranscript) {
+    const rawLines = rawTranscript.split(/\r?\n+/).filter((l) => l.trim().length > 0);
+    let currentTimeCounter = 0;
 
-  // Step 1: Split every chunk into individual sentences and estimate timestamps
-  for (const chunk of chunks) {
-    const [chunkStart, chunkEnd] = chunk.timestamp;
-    const chunkDuration = Math.max(0.1, chunkEnd - chunkStart);
-    const cleanText = chunk.text.trim();
-    if (!cleanText) continue;
+    for (const line of rawLines) {
+      const tsMatch = line.match(/\[(\d{1,2}:\d{2}(?::\d{2})?)/);
+      if (tsMatch) {
+        const parts = tsMatch[1].split(':').map(Number);
+        currentTimeCounter =
+          parts.length === 2 ? parts[0] * 60 + parts[1] : parts[0] * 3600 + parts[1] * 60 + parts[2];
+      }
+      const speakerMatch = line.match(/\*\*\[(.*?)\]/);
+      const speaker = speakerMatch ? speakerMatch[1] : 'Speaker 1';
+      const cleanText = line
+        .replace(/^\*\*\[.*?\](?:\s*\(.*?\))?:\*\*\s*/, '')
+        .replace(/^\[\d{1,2}:\d{2}(?::\d{2})?(?:\s*-\s*\d{1,2}:\d{2}(?::\d{2})?)?\]\s*/, '')
+        .trim();
 
-    // Regex to split on full stops, question marks, and exclamation marks while keeping punctuation
-    const rawSentences = cleanText.match(/[^.!?]+[.!?]+(?:\s|$)|[^.!?]+$/g) || [cleanText];
-    const validSentences = rawSentences.map((s) => s.trim()).filter(Boolean);
+      if (cleanText) {
+        sourceChunks.push({
+          timestamp: [currentTimeCounter, currentTimeCounter + 15],
+          text: cleanText,
+          speaker,
+        });
+        currentTimeCounter += 15;
+      }
+    }
+  }
 
-    const totalChars = validSentences.reduce((acc, s) => acc + s.length, 0);
-    let accumulatedChars = 0;
+  if (sourceChunks.length === 0) return [];
 
-    for (const sentence of validSentences) {
-      const sentenceStartRatio = totalChars > 0 ? accumulatedChars / totalChars : 0;
-      accumulatedChars += sentence.length;
-      const sentenceEndRatio = totalChars > 0 ? accumulatedChars / totalChars : 1;
+  interface SubUnit {
+    text: string;
+    startTime: number;
+    endTime: number;
+    speaker: string;
+  }
 
-      sentences.push({
-        text: sentence,
-        startTime: chunkStart + sentenceStartRatio * chunkDuration,
-        endTime: chunkStart + sentenceEndRatio * chunkDuration,
+  const allUnits: SubUnit[] = [];
+
+  for (const chunk of sourceChunks) {
+    const [cStart, cEnd] = chunk.timestamp;
+    const dur = Math.max(1, (cEnd ?? cStart + 15) - cStart);
+    const thoughtUnits = splitIntoThoughtUnits(chunk.text);
+    if (thoughtUnits.length === 0) continue;
+
+    const totalChars = thoughtUnits.reduce((acc, u) => acc + u.length, 0);
+    let accumulated = 0;
+
+    for (const unitText of thoughtUnits) {
+      const startFrac = totalChars > 0 ? accumulated / totalChars : 0;
+      accumulated += unitText.length;
+      const endFrac = totalChars > 0 ? accumulated / totalChars : 1;
+
+      allUnits.push({
+        text: unitText,
+        startTime: cStart + startFrac * dur,
+        endTime: cStart + endFrac * dur,
         speaker: chunk.speaker || 'Speaker 1',
       });
     }
   }
 
-  // Step 2: Assemble sentences into bite-sized paragraphs (2-3 sentences or ~40 words max)
   const paragraphs: FormattedParagraph[] = [];
-  let currentSentences: SentenceUnit[] = [];
-  let currentWordCount = 0;
+  let currentGroup: SubUnit[] = [];
+  let currentWords = 0;
 
-  const flushParagraph = () => {
-    if (currentSentences.length === 0) return;
-    const first = currentSentences[0];
-    const last = currentSentences[currentSentences.length - 1];
+  const flush = () => {
+    if (currentGroup.length === 0) return;
+    const first = currentGroup[0];
+    const last = currentGroup[currentGroup.length - 1];
 
     paragraphs.push({
-      id: `para-${first.startTime.toFixed(2)}`,
+      id: `para-${first.startTime.toFixed(2)}-${Math.random().toString(36).substring(2, 6)}`,
       speaker: first.speaker,
       startTime: first.startTime,
       endTime: last.endTime,
-      text: currentSentences.map((s) => s.text).join(' '),
+      text: currentGroup.map((u) => u.text).join(' '),
     });
 
-    currentSentences = [];
-    currentWordCount = 0;
+    currentGroup = [];
+    currentWords = 0;
   };
 
-  for (const sentence of sentences) {
-    const wordCount = sentence.text.split(/\s+/).length;
-    const isFirstInBatch = currentSentences.length === 0;
-    const speakerChanged = !isFirstInBatch && currentSentences[0].speaker !== sentence.speaker;
-    const wouldExceedWordLimit = currentWordCount + wordCount > 45;
-    const hitSentenceLimit = currentSentences.length >= 3;
+  for (const unit of allUnits) {
+    const count = unit.text.split(/\s+/).length;
+    const speakerChanged = currentGroup.length > 0 && currentGroup[0].speaker !== unit.speaker;
+    const wordCeilingReached = currentWords + count > 38;
+    const unitCountReached = currentGroup.length >= 3;
 
-    if (speakerChanged || wouldExceedWordLimit || hitSentenceLimit) {
-      flushParagraph();
+    if (speakerChanged || wordCeilingReached || unitCountReached) {
+      flush();
     }
 
-    currentSentences.push(sentence);
-    currentWordCount += wordCount;
+    currentGroup.push(unit);
+    currentWords += count;
   }
 
-  flushParagraph();
+  flush();
   return paragraphs;
 }
